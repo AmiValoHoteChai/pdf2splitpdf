@@ -1,0 +1,632 @@
+---
+// src/pages/index.astro
+import Layout from '../layouts/Layout.astro';
+import Header from '../components/Header.astro';
+import DropZone from '../components/DropZone.astro';
+import FileCard from '../components/FileCard.astro';
+import ProgressCard from '../components/ProgressCard.astro';
+import ResultCard from '../components/ResultCard.astro';
+import ErrorCard from '../components/ErrorCard.astro';
+import ConfirmModal from '../components/ConfirmModal.astro';
+import PreviewModal from '../components/PreviewModal.astro';
+import Footer from '../components/Footer.astro';
+---
+
+<Layout>
+  <div class="app-container">
+    <Header />
+
+    <main class="main-content">
+      <section class="intro-section">
+        <h1 class="main-title">Split PDF Documents</h1>
+        <p class="main-subtitle">Extract pages, split into chunks, or divide into custom pieces in seconds.</p>
+      </section>
+
+      <div class="converter-card" id="converterCard">
+        <DropZone />
+        <FileCard />
+        <ProgressCard />
+        <ResultCard />
+        <ErrorCard />
+      </div>
+    </main>
+
+    <Footer />
+    <ConfirmModal />
+    <PreviewModal />
+  </div>
+</Layout>
+
+<script>
+  import {
+    loadPdfMetadata,
+    computeSplitPlan,
+    splitPdfDocument,
+    downloadSinglePdf,
+    downloadAllAsZip
+  } from '../scripts/pdf-splitter.js';
+
+  // App State
+  let currentFile: File | null = null;
+  let currentBuffer: ArrayBuffer | null = null;
+  let totalPages = 0;
+  let currentSplitPlan: any[] = [];
+  let splitResults: any[] = [];
+  let splitStartTime = 0;
+  let isCancelled = false;
+  let splitMode: 'by-pages' | 'equal-parts' = 'by-pages';
+  let downloadedIndices = new Set<number>();
+  let pendingDownloadIndex: number | null = null;
+  let activePreviewIndex: number | null = null;
+
+  // DOM Elements - State Views
+  const stateEmpty = document.getElementById('stateEmpty');
+  const stateSelected = document.getElementById('stateSelected');
+  const stateProcessing = document.getElementById('stateProcessing');
+  const stateSuccess = document.getElementById('stateSuccess');
+  const stateError = document.getElementById('stateError');
+
+  // DOM Elements - Dropzone
+  const dropZone = document.getElementById('dropZone');
+  const fileInput = document.getElementById('fileInput') as HTMLInputElement;
+  const browseBtn = document.getElementById('browseBtn');
+
+  // DOM Elements - FileCard
+  const selectedFileName = document.getElementById('selectedFileName');
+  const selectedFileSize = document.getElementById('selectedFileSize');
+  const selectedPageCount = document.getElementById('selectedPageCount');
+  const removeFileBtn = document.getElementById('removeFileBtn');
+  const changeFileBtn = document.getElementById('changeFileBtn');
+  const startSplitBtn = document.getElementById('startSplitBtn');
+
+  // Mode Tabs & Controls
+  const tabByPages = document.getElementById('tabByPages');
+  const tabEqualParts = document.getElementById('tabEqualParts');
+  const splitControlMainLabel = document.getElementById('splitControlMainLabel');
+  const splitControlSubLabel = document.getElementById('splitControlSubLabel');
+  const chunkSizeInput = document.getElementById('chunkSizeInput') as HTMLInputElement;
+  const btnDecChunk = document.getElementById('btnDecChunk');
+  const btnIncChunk = document.getElementById('btnIncChunk');
+
+  const planSentenceMain = document.getElementById('planSentenceMain');
+  const planSentenceDetail = document.getElementById('planSentenceDetail');
+  const planSegmentBar = document.getElementById('planSegmentBar');
+
+  // DOM Elements - ProgressCard
+  const processingStatus = document.getElementById('processingStatus');
+  const processingFileName = document.getElementById('processingFileName');
+  const progressBar = document.getElementById('progressBar');
+  const btnCancelSplit = document.getElementById('btnCancelSplit');
+
+  // DOM Elements - ResultCard
+  const successTimeInfo = document.getElementById('successTimeInfo');
+  const statPieces = document.getElementById('statPieces');
+  const statPages = document.getElementById('statPages');
+  const statSize = document.getElementById('statSize');
+  const splitResultsList = document.getElementById('splitResultsList');
+  const downloadZipBtn = document.getElementById('downloadZipBtn');
+  const splitAnotherBtn = document.getElementById('splitAnotherBtn');
+
+  // DOM Elements - ErrorCard
+  const errorMessage = document.getElementById('errorMessage');
+  const errorRetryBtn = document.getElementById('errorRetryBtn');
+
+  // DOM Elements - Confirm Modal
+  const confirmModal = document.getElementById('confirmModal');
+  const confirmModalText = document.getElementById('confirmModalText');
+  const btnCancelConfirm = document.getElementById('btnCancelConfirm');
+  const btnProceedConfirm = document.getElementById('btnProceedConfirm');
+
+  // DOM Elements - Preview Modal
+  const previewModal = document.getElementById('previewModal');
+  const previewPageBadge = document.getElementById('previewPageBadge');
+  const pdfPreviewIframe = document.getElementById('pdfPreviewIframe') as HTMLIFrameElement;
+  const btnClosePreview = document.getElementById('btnClosePreview');
+  const btnPreviewDownload = document.getElementById('btnPreviewDownload');
+
+  function showState(target: HTMLElement | null) {
+    [stateEmpty, stateSelected, stateProcessing, stateSuccess, stateError].forEach(el => {
+      if (el) el.classList.add('hidden');
+    });
+    if (target) target.classList.remove('hidden');
+  }
+
+  async function handleFileSelect(file: File) {
+    if (!file || (!file.name.toLowerCase().endsWith('.pdf') && file.type !== 'application/pdf')) {
+      return;
+    }
+
+    try {
+      currentFile = file;
+      currentBuffer = await file.arrayBuffer();
+
+      if (selectedFileName) selectedFileName.textContent = file.name;
+      if (selectedFileSize) selectedFileSize.textContent = formatBytes(file.size);
+
+      // Read total pages
+      const metadata = await loadPdfMetadata(currentBuffer);
+      totalPages = metadata.numPages;
+
+      if (selectedPageCount) selectedPageCount.textContent = `${totalPages} page${totalPages === 1 ? '' : 's'}`;
+
+      // Reset to default mode on new upload
+      setSplitMode('by-pages');
+      showState(stateSelected);
+    } catch (err: any) {
+      console.error('Error loading PDF:', err);
+      if (errorMessage) errorMessage.textContent = err?.message || 'Failed to read the PDF document.';
+      showState(stateError);
+    }
+  }
+
+  function setSplitMode(mode: 'by-pages' | 'equal-parts') {
+    splitMode = mode;
+    tabByPages?.classList.toggle('active', mode === 'by-pages');
+    tabEqualParts?.classList.toggle('active', mode === 'equal-parts');
+
+    if (mode === 'by-pages') {
+      if (splitControlMainLabel) splitControlMainLabel.textContent = 'Pages Per Split Piece';
+      if (splitControlSubLabel) splitControlSubLabel.textContent = 'Type number or drag horizontally to adjust';
+      if (chunkSizeInput) {
+        chunkSizeInput.max = String(totalPages || 999);
+        chunkSizeInput.min = '1';
+        chunkSizeInput.value = String(Math.min(5, totalPages || 5));
+      }
+    } else {
+      if (splitControlMainLabel) splitControlMainLabel.textContent = 'Number of Equal Parts';
+      if (splitControlSubLabel) splitControlSubLabel.textContent = 'Divide total document into this many files';
+      if (chunkSizeInput) {
+        chunkSizeInput.max = String(Math.min(totalPages || 50, 50));
+        chunkSizeInput.min = '2';
+        chunkSizeInput.value = String(Math.min(2, totalPages || 2));
+      }
+    }
+
+    recalculateSplitPlan();
+  }
+
+  function resetToEmpty() {
+    currentFile = null;
+    currentBuffer = null;
+    totalPages = 0;
+    currentSplitPlan = [];
+    splitResults = [];
+    downloadedIndices.clear();
+    if (fileInput) fileInput.value = '';
+    showState(stateEmpty);
+  }
+
+  function setChunkValue(val: number) {
+    const minVal = splitMode === 'equal-parts' ? 2 : 1;
+    const maxVal = splitMode === 'equal-parts' ? Math.min(totalPages || 50, 50) : (totalPages || 999);
+    const clamped = Math.max(minVal, Math.min(maxVal, val));
+    if (chunkSizeInput) chunkSizeInput.value = String(clamped);
+    recalculateSplitPlan();
+  }
+
+  function recalculateSplitPlan() {
+    if (!totalPages || totalPages <= 0) return;
+
+    const val = chunkSizeInput ? parseInt(chunkSizeInput.value, 10) || 1 : 5;
+
+    currentSplitPlan = computeSplitPlan(totalPages, splitMode, {
+      chunkSize: val,
+      numParts: val
+    });
+
+    renderSplitPlanSentence(val);
+  }
+
+  function renderSplitPlanSentence(val: number) {
+    if (!planSentenceMain || !planSentenceDetail) return;
+
+    const count = currentSplitPlan.length;
+
+    if (count === 0) {
+      planSentenceMain.textContent = 'No split pieces';
+      planSentenceDetail.textContent = 'Please adjust the split settings.';
+      if (startSplitBtn) (startSplitBtn as HTMLButtonElement).disabled = true;
+      if (planSegmentBar) planSegmentBar.innerHTML = '';
+      return;
+    }
+
+    if (startSplitBtn) (startSplitBtn as HTMLButtonElement).disabled = false;
+
+    // Headline
+    if (splitMode === 'by-pages') {
+      planSentenceMain.textContent = `Will create ${count} PDF file${count === 1 ? '' : 's'}`;
+    } else {
+      planSentenceMain.textContent = `Will divide into ${count} PDF file${count === 1 ? '' : 's'}`;
+    }
+
+    // Detail sentence with instant-scan formula breakdown
+    const sizeGroups = new Map<number, number>();
+    for (const part of currentSplitPlan) {
+      sizeGroups.set(part.pageCount, (sizeGroups.get(part.pageCount) || 0) + 1);
+    }
+
+    const sortedSizes = Array.from(sizeGroups.entries()).sort((a, b) => b[0] - a[0]);
+
+    if (sortedSizes.length === 1) {
+      const [pages, numFiles] = sortedSizes[0];
+      planSentenceDetail.textContent = `${numFiles} file${numFiles === 1 ? '' : 's'} × ${pages} page${pages === 1 ? '' : 's'} each`;
+    } else {
+      const partsText = sortedSizes.map(([pages, numFiles]) => {
+        return `${numFiles} file${numFiles === 1 ? '' : 's'} × ${pages} pg${pages === 1 ? '' : 's'}`;
+      });
+      planSentenceDetail.textContent = partsText.join('  +  ');
+    }
+
+
+    if (planSegmentBar) {
+      const maxPages = Math.max(...currentSplitPlan.map(p => p.pageCount));
+      planSegmentBar.innerHTML = currentSplitPlan.map(item => `
+        <div class="plan-segment-item ${item.pageCount < maxPages ? 'is-remainder' : ''}" style="flex: ${item.pageCount};" title="${item.label}: ${item.pageRangeText} (${item.pageCount} pgs)"></div>
+      `).join('');
+    }
+  }
+
+
+  async function startSplitting() {
+    if (!currentBuffer || !currentFile || currentSplitPlan.length === 0) return;
+
+    isCancelled = false;
+    splitStartTime = performance.now();
+
+    if (processingFileName) processingFileName.textContent = currentFile.name;
+    if (processingStatus) processingStatus.textContent = `Preparing ${currentSplitPlan.length} split pieces...`;
+    if (progressBar) progressBar.style.width = '5%';
+
+    showState(stateProcessing);
+
+    try {
+      splitResults = await splitPdfDocument(
+        currentBuffer,
+        currentSplitPlan,
+        currentFile.name,
+        (progress: any) => {
+          if (isCancelled) throw new Error('Operation cancelled by user.');
+          if (processingStatus) processingStatus.textContent = progress.phase;
+          if (progressBar) progressBar.style.width = `${progress.percent}%`;
+        }
+      );
+
+      const elapsedSec = ((performance.now() - splitStartTime) / 1000).toFixed(2);
+      if (successTimeInfo) successTimeInfo.textContent = `Processed in-browser in ${elapsedSec}s`;
+
+      renderSplitResults();
+      showState(stateSuccess);
+    } catch (err: any) {
+      if (isCancelled) {
+        showState(stateSelected);
+        return;
+      }
+      console.error('Splitting error:', err);
+      if (errorMessage) errorMessage.textContent = err?.message || 'Failed to split the PDF document.';
+      showState(stateError);
+    }
+  }
+
+  function renderSplitResults() {
+    if (!splitResultsList) return;
+
+    downloadedIndices.clear();
+    const totalSplitBytes = splitResults.reduce((acc, cur) => acc + cur.size, 0);
+    const totalPagesExtracted = splitResults.reduce((acc, cur) => acc + cur.pageCount, 0);
+
+    if (statPieces) statPieces.textContent = String(splitResults.length);
+    if (statPages) statPages.textContent = String(totalPagesExtracted);
+    if (statSize) statSize.textContent = formatBytes(totalSplitBytes);
+
+    splitResultsList.innerHTML = splitResults.map((item, idx) => `
+      <div class="split-result-row" id="splitRow-${idx}">
+        <div class="split-result-info">
+          <div class="split-result-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+            </svg>
+          </div>
+          <div class="split-result-text">
+            <div class="split-result-filename">
+              <span class="split-range-badge">${item.pageRangeText}</span>
+              ${item.filename}
+            </div>
+            <div class="split-result-meta">${item.pageCount} page${item.pageCount === 1 ? '' : 's'} • ${formatBytes(item.size)}</div>
+          </div>
+        </div>
+        <div class="split-action-buttons">
+          <button type="button" class="btn-split-preview" data-index="${idx}" title="Preview PDF piece">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+              <circle cx="12" cy="12" r="3"></circle>
+            </svg>
+            <span>Preview</span>
+          </button>
+          <button type="button" class="btn-split-download" data-index="${idx}" id="btnDownload-${idx}">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            <span>Download</span>
+          </button>
+        </div>
+      </div>
+    `).join('');
+
+    // Attach click handlers
+    const downloadBtns = splitResultsList.querySelectorAll('.btn-split-download');
+    downloadBtns.forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const target = e.currentTarget as HTMLElement;
+        const index = parseInt(target.getAttribute('data-index') || '0', 10);
+        handleDownloadClick(index);
+      });
+    });
+
+    const previewBtns = splitResultsList.querySelectorAll('.btn-split-preview');
+    previewBtns.forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const target = e.currentTarget as HTMLElement;
+        const index = parseInt(target.getAttribute('data-index') || '0', 10);
+        openPreviewModal(index);
+      });
+    });
+  }
+
+  function handleDownloadClick(index: number) {
+    const item = splitResults[index];
+    if (!item) return;
+
+    if (downloadedIndices.has(index)) {
+      // Prompt confirmation modal warning
+      pendingDownloadIndex = index;
+      if (confirmModalText) {
+        confirmModalText.textContent = `"${item.filename}" has already been downloaded. Would you like to save another copy?`;
+      }
+      if (confirmModal) confirmModal.classList.remove('hidden');
+    } else {
+      // First download -> trigger and mark green
+      markItemAsDownloaded(index);
+      downloadSinglePdf(item.filename, item.blob);
+    }
+  }
+
+  function markItemAsDownloaded(index: number) {
+    downloadedIndices.add(index);
+    const row = document.getElementById(`splitRow-${index}`);
+    const btn = document.getElementById(`btnDownload-${index}`);
+
+    if (row) row.classList.add('is-downloaded');
+    if (btn) {
+      btn.classList.add('downloaded');
+      btn.innerHTML = `
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="20 6 9 17 4 12"></polyline>
+        </svg>
+        <span>Downloaded</span>
+      `;
+    }
+  }
+
+  function markAllAsDownloaded() {
+    splitResults.forEach((_, idx) => markItemAsDownloaded(idx));
+  }
+
+  function openPreviewModal(index: number) {
+    const item = splitResults[index];
+    if (!item || !previewModal) return;
+
+    activePreviewIndex = index;
+    if (previewPageBadge) previewPageBadge.textContent = `${item.pageRangeText} (${item.pageCount} pg${item.pageCount === 1 ? '' : 's'})`;
+    if (pdfPreviewIframe) pdfPreviewIframe.src = item.url;
+
+    // Lock page scrollbar
+    document.documentElement.style.overflow = 'hidden';
+    document.body.style.overflow = 'hidden';
+
+    previewModal.classList.remove('hidden');
+  }
+
+  function closePreviewModal() {
+    if (previewModal) previewModal.classList.add('hidden');
+    if (pdfPreviewIframe) pdfPreviewIframe.src = 'about:blank';
+    activePreviewIndex = null;
+
+    // Restore page scrollbar
+    document.documentElement.style.overflow = '';
+    document.body.style.overflow = '';
+  }
+
+
+  function formatBytes(bytes: number): string {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  }
+
+  function init() {
+    if (!dropZone || !fileInput) return;
+
+    // Initial state setup: show only dropzone
+    showState(stateEmpty);
+
+    // Mode switch tabs
+    tabByPages?.addEventListener('click', () => setSplitMode('by-pages'));
+    tabEqualParts?.addEventListener('click', () => setSplitMode('equal-parts'));
+
+    // Drag & Drop
+    ['dragenter', 'dragover'].forEach(name => {
+      dropZone.addEventListener(name, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.add('drag-active');
+      });
+    });
+
+    ['dragleave', 'drop'].forEach(name => {
+      dropZone.addEventListener(name, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.remove('drag-active');
+      });
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) {
+        handleFileSelect(e.dataTransfer.files[0]);
+      }
+    });
+
+    browseBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      fileInput.click();
+    });
+
+    dropZone.addEventListener('click', () => fileInput.click());
+
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files && fileInput.files[0]) {
+        handleFileSelect(fileInput.files[0]);
+      }
+    });
+
+    // File card events
+    removeFileBtn?.addEventListener('click', resetToEmpty);
+    changeFileBtn?.addEventListener('click', () => fileInput.click());
+    startSplitBtn?.addEventListener('click', startSplitting);
+
+    // Stepper Drag Scrubbing & Direct Typing
+    const stepperControl = document.querySelector('.stepper-control') as HTMLElement;
+    let isDragging = false;
+    let startX = 0;
+    let startVal = 5;
+    let hasMoved = false;
+
+    stepperControl?.addEventListener('mousedown', (e) => {
+      // Allow plus/minus buttons to work normally
+      if ((e.target as HTMLElement).closest('.btn-stepper')) return;
+
+      isDragging = true;
+      hasMoved = false;
+      startX = e.clientX;
+      startVal = parseInt(chunkSizeInput?.value || '1', 10);
+      stepperControl.classList.add('is-dragging');
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+      const dx = e.clientX - startX;
+      if (Math.abs(dx) > 3) {
+        hasMoved = true;
+        // 8px of drag = 1 page change
+        const delta = Math.round(dx / 8);
+        setChunkValue(startVal + delta);
+      }
+    });
+
+    document.addEventListener('mouseup', () => {
+      if (isDragging) {
+        isDragging = false;
+        stepperControl?.classList.remove('is-dragging');
+        if (!hasMoved) {
+          chunkSizeInput?.select();
+        }
+      }
+    });
+
+    btnDecChunk?.addEventListener('click', () => {
+      const cur = parseInt(chunkSizeInput?.value || '1', 10);
+      setChunkValue(cur - 1);
+    });
+
+    btnIncChunk?.addEventListener('click', () => {
+      const cur = parseInt(chunkSizeInput?.value || '1', 10);
+      setChunkValue(cur + 1);
+    });
+
+    chunkSizeInput?.addEventListener('focus', () => {
+      chunkSizeInput.select();
+    });
+
+    chunkSizeInput?.addEventListener('click', () => {
+      if (!hasMoved) chunkSizeInput.select();
+    });
+
+    chunkSizeInput?.addEventListener('input', () => {
+      const cur = parseInt(chunkSizeInput.value, 10);
+      if (!isNaN(cur) && cur > 0) {
+        setChunkValue(cur);
+      }
+    });
+
+    chunkSizeInput?.addEventListener('blur', () => {
+      let cur = parseInt(chunkSizeInput.value, 10);
+      if (isNaN(cur) || cur < 1) cur = 1;
+      if (totalPages > 0 && cur > totalPages) cur = totalPages;
+      setChunkValue(cur);
+    });
+
+    // Progress card cancel
+    btnCancelSplit?.addEventListener('click', () => {
+      isCancelled = true;
+      showState(stateSelected);
+    });
+
+    // Result card events
+    splitAnotherBtn?.addEventListener('click', resetToEmpty);
+    downloadZipBtn?.addEventListener('click', () => {
+      if (currentFile && splitResults.length > 0) {
+        markAllAsDownloaded();
+        const base = currentFile.name.replace(/\.pdf$/i, '');
+        downloadAllAsZip(splitResults, `${base}_split.zip`);
+      }
+    });
+
+    // Confirmation Modal Events
+    btnCancelConfirm?.addEventListener('click', () => {
+      if (confirmModal) confirmModal.classList.add('hidden');
+      pendingDownloadIndex = null;
+    });
+
+    btnProceedConfirm?.addEventListener('click', () => {
+      if (pendingDownloadIndex !== null && splitResults[pendingDownloadIndex]) {
+        const item = splitResults[pendingDownloadIndex];
+        downloadSinglePdf(item.filename, item.blob);
+      }
+      if (confirmModal) confirmModal.classList.add('hidden');
+      pendingDownloadIndex = null;
+    });
+
+    // Preview Modal Events
+    btnClosePreview?.addEventListener('click', closePreviewModal);
+    btnPreviewDownload?.addEventListener('click', () => {
+      if (activePreviewIndex !== null && splitResults[activePreviewIndex]) {
+        handleDownloadClick(activePreviewIndex);
+      }
+    });
+
+    // Global escape key handler to close modals
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        if (confirmModal && !confirmModal.classList.contains('hidden')) {
+          confirmModal.classList.add('hidden');
+          pendingDownloadIndex = null;
+        } else if (previewModal && !previewModal.classList.contains('hidden')) {
+          closePreviewModal();
+        }
+      }
+    });
+
+    // Error retry
+    errorRetryBtn?.addEventListener('click', resetToEmpty);
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+</script>
+
+
+

@@ -1,0 +1,17 @@
+---
+// src/components/ErrorCard.astro
+---
+<div class="state-view hidden" id="stateError">
+  <div class="error-box">
+    <div class="error-icon-box">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"></circle>
+        <line x1="12" y1="8" x2="12" y2="12"></line>
+        <line x1="12" y1="16" x2="12.01" y2="16"></line>
+      </svg>
+    </div>
+    <h3 class="error-title">Splitting Failed</h3>
+    <p class="error-message" id="errorMessage">An unexpected error occurred while processing the document.</p>
+    <button type="button" class="btn btn-secondary" id="errorRetryBtn">Try Another File</button>
+  </div>
+</div>

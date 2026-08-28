@@ -1,0 +1,24 @@
+---
+// src/components/DropZone.astro
+---
+<div class="state-view" id="stateEmpty">
+  <div class="drop-zone" id="dropZone">
+    <input type="file" id="fileInput" class="file-input" accept="application/pdf,.pdf" aria-label="Upload PDF file" />
+    <div class="drop-content">
+      <div class="icon-circle">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="17 8 12 3 7 8"></polyline>
+          <line x1="12" y1="3" x2="12" y2="15"></line>
+        </svg>
+      </div>
+      <div class="drop-text-group">
+        <p class="drop-primary-text">Drag and drop your PDF file here</p>
+        <p class="drop-secondary-text">or <button type="button" class="browse-link" id="browseBtn">browse files</button> from your computer</p>
+      </div>
+      <div class="format-info">
+        <span>PDF</span><span>Multi-Page Split</span><span>Custom Chunks</span><span>Fast & Local</span>
+      </div>
+    </div>
+  </div>
+</div>

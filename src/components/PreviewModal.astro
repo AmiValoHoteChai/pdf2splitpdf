@@ -1,0 +1,34 @@
+---
+// src/components/PreviewModal.astro
+---
+<div class="preview-fullscreen-overlay hidden" id="previewModal">
+  <!-- 100% Edge-to-Edge PDF View -->
+  <iframe id="pdfPreviewIframe" class="preview-iframe-full" title="PDF Document Fullscreen Preview"></iframe>
+
+  <!-- Floating Apple-Style Glassmorphism Dock -->
+  <div class="preview-floating-dock">
+    <div class="dock-info">
+      <span class="dock-badge" id="previewPageBadge">1 page</span>
+    </div>
+    <div class="dock-divider"></div>
+    <button type="button" class="dock-btn dock-btn-download" id="btnPreviewDownload">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+        <polyline points="7 10 12 15 17 10"></polyline>
+        <line x1="12" y1="15" x2="12" y2="3"></line>
+      </svg>
+      <span>Download</span>
+    </button>
+    <button type="button" class="dock-btn dock-btn-close" id="btnClosePreview" title="Close preview (Esc)">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="18" y1="6" x2="6" y2="18"></line>
+        <line x1="6" y1="6" x2="18" y2="18"></line>
+      </svg>
+      <span>Close</span>
+    </button>
+  </div>
+</div>
+
+
+
+

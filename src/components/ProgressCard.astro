@@ -1,0 +1,17 @@
+---
+// src/components/ProgressCard.astro
+---
+<div class="state-view hidden" id="stateProcessing">
+  <div class="processing-box">
+    <div class="spinner-indicator"></div>
+    <div class="processing-status-group">
+      <h3 class="processing-title" id="processingStatus">Splitting PDF document...</h3>
+      <p class="processing-file" id="processingFileName">document.pdf</p>
+    </div>
+    <div class="progress-bar-container">
+      <div class="progress-bar" id="progressBar" style="width: 0%;"></div>
+    </div>
+    <p class="processing-hint">Extracting vector pages directly in your browser</p>
+    <button type="button" class="btn btn-secondary" id="btnCancelSplit" style="margin-top: 8px;">Cancel</button>
+  </div>
+</div>

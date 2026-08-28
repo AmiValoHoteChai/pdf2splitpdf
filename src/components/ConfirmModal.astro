@@ -1,0 +1,29 @@
+---
+// src/components/ConfirmModal.astro
+---
+<div class="modal-overlay hidden" id="confirmModal">
+  <div class="modal-card">
+    <div class="modal-icon-box warning">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"></circle>
+        <line x1="12" y1="8" x2="12" y2="12"></line>
+        <line x1="12" y1="16" x2="12.01" y2="16"></line>
+      </svg>
+    </div>
+    <div class="modal-content">
+      <h3 class="modal-title">Download Again?</h3>
+      <p class="modal-desc" id="confirmModalText">This file has already been downloaded. Would you like to save another copy?</p>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-secondary" id="btnCancelConfirm">Cancel</button>
+      <button type="button" class="btn btn-primary" id="btnProceedConfirm">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="7 10 12 15 17 10"></polyline>
+          <line x1="12" y1="15" x2="12" y2="3"></line>
+        </svg>
+        <span>Download Again</span>
+      </button>
+    </div>
+  </div>
+</div>
