@@ -9,6 +9,7 @@ import ResultCard from '../components/ResultCard.astro';
 import ErrorCard from '../components/ErrorCard.astro';
 import ConfirmModal from '../components/ConfirmModal.astro';
 import PreviewModal from '../components/PreviewModal.astro';
+import VisualTrimmerModal from '../components/VisualTrimmerModal.astro';
 import Footer from '../components/Footer.astro';
 ---
 
@@ -34,6 +35,7 @@ import Footer from '../components/Footer.astro';
     <Footer />
     <ConfirmModal />
     <PreviewModal />
+    <VisualTrimmerModal />
   </div>
 </Layout>
 
@@ -45,6 +47,10 @@ import Footer from '../components/Footer.astro';
     downloadSinglePdf,
     downloadAllAsZip
   } from '../scripts/pdf-splitter.js';
+  import {
+    getPdfJsDocument,
+    renderPageToCanvas
+  } from '../scripts/pdf-thumbnail-engine.js';
 
   // App State
   let currentFile: File | null = null;
@@ -54,10 +60,24 @@ import Footer from '../components/Footer.astro';
   let splitResults: any[] = [];
   let splitStartTime = 0;
   let isCancelled = false;
-  let splitMode: 'by-pages' | 'equal-parts' = 'by-pages';
+  let splitMode: 'by-pages' | 'equal-parts' | 'page-range' = 'by-pages';
   let downloadedIndices = new Set<number>();
   let pendingDownloadIndex: number | null = null;
   let activePreviewIndex: number | null = null;
+
+  // Video Trimmer State
+  let pdfJsDoc: any = null;
+  let monitorCurrentPage = 1;
+  let trimmerInPage = 1;
+  let trimmerOutPage = 1;
+  let selectedPagesSet = new Set<number>();
+  let isTrimmerOpen = false;
+
+  function getSelectedPagesArray(): number[] {
+    const list = Array.from(selectedPagesSet).sort((a, b) => a - b);
+    if (list.length === 0) return [Math.max(1, Math.min(totalPages || 1, monitorCurrentPage))];
+    return list;
+  }
 
   // DOM Elements - State Views
   const stateEmpty = document.getElementById('stateEmpty');
@@ -79,18 +99,67 @@ import Footer from '../components/Footer.astro';
   const changeFileBtn = document.getElementById('changeFileBtn');
   const startSplitBtn = document.getElementById('startSplitBtn');
 
-  // Mode Tabs & Controls
+  // Mode Tabs & Control Containers
   const tabByPages = document.getElementById('tabByPages');
   const tabEqualParts = document.getElementById('tabEqualParts');
+  const tabCutRange = document.getElementById('tabCutRange');
+  const controlByPages = document.getElementById('controlByPages');
+  const controlPageRange = document.getElementById('controlPageRange');
+
   const splitControlMainLabel = document.getElementById('splitControlMainLabel');
   const splitControlSubLabel = document.getElementById('splitControlSubLabel');
   const chunkSizeInput = document.getElementById('chunkSizeInput') as HTMLInputElement;
   const btnDecChunk = document.getElementById('btnDecChunk');
   const btnIncChunk = document.getElementById('btnIncChunk');
 
+  // Range Inputs & Buttons
+  const rangeStartInput = document.getElementById('rangeStartInput') as HTMLInputElement;
+  const rangeEndInput = document.getElementById('rangeEndInput') as HTMLInputElement;
+  const btnDecRangeStart = document.getElementById('btnDecRangeStart');
+  const btnIncRangeStart = document.getElementById('btnIncRangeStart');
+  const btnDecRangeEnd = document.getElementById('btnDecRangeEnd');
+  const btnIncRangeEnd = document.getElementById('btnIncRangeEnd');
+
+  // Quick Preset Buttons & Launch Trimmer
+  const presetAllPages = document.getElementById('presetAllPages');
+  const presetFirstHalf = document.getElementById('presetFirstHalf');
+  const presetSecondHalf = document.getElementById('presetSecondHalf');
+  const presetFirstPage = document.getElementById('presetFirstPage');
+  const btnLaunchVisualTrimmer = document.getElementById('btnLaunchVisualTrimmer');
+
   const planSentenceMain = document.getElementById('planSentenceMain');
   const planSentenceDetail = document.getElementById('planSentenceDetail');
   const planSegmentBar = document.getElementById('planSegmentBar');
+
+  // DOM Elements - Visual Trimmer Modal
+  const visualTrimmerModal = document.getElementById('visualTrimmerModal');
+  const btnCloseTrimmer = document.getElementById('btnCloseTrimmer');
+  const btnCancelTrimmer = document.getElementById('btnCancelTrimmer');
+  const btnApplyCut = document.getElementById('btnApplyCut');
+  const trimmerDocName = document.getElementById('trimmerDocName');
+  const trimmerRangePill = document.getElementById('trimmerRangePill');
+  const trimmerRangeDetail = document.getElementById('trimmerRangeDetail');
+  const trimmerMonitorCanvas = document.getElementById('trimmerMonitorCanvas') as HTMLCanvasElement;
+  const monitorLoading = document.getElementById('monitorLoading');
+  const monitorCurrentPageNum = document.getElementById('monitorCurrentPageNum');
+  const monitorTotalPagesNum = document.getElementById('monitorTotalPagesNum');
+  const btnMonitorPrev = document.getElementById('btnMonitorPrev');
+  const btnMonitorNext = document.getElementById('btnMonitorNext');
+
+  // Trimmer Transport
+  const btnJumpStart = document.getElementById('btnJumpStart');
+  const btnStepPrev = document.getElementById('btnStepPrev');
+  const btnStepNext = document.getElementById('btnStepNext');
+  const btnJumpEnd = document.getElementById('btnJumpEnd');
+  const transportCurrent = document.getElementById('transportCurrent');
+  const transportTotal = document.getElementById('transportTotal');
+  const btnMarkIn = document.getElementById('btnMarkIn');
+  const btnMarkOut = document.getElementById('btnMarkOut');
+  const btnResetRange = document.getElementById('btnResetRange');
+
+  // Trimmer Timeline Track
+  const timelineScrollWrapper = document.getElementById('timelineScrollWrapper');
+  const timelineTrack = document.getElementById('timelineTrack');
 
   // DOM Elements - ProgressCard
   const processingStatus = document.getElementById('processingStatus');
@@ -139,6 +208,7 @@ import Footer from '../components/Footer.astro';
     try {
       currentFile = file;
       currentBuffer = await file.arrayBuffer();
+      pdfJsDoc = null; // will load lazily on trimmer open
 
       if (selectedFileName) selectedFileName.textContent = file.name;
       if (selectedFileSize) selectedFileSize.textContent = formatBytes(file.size);
@@ -149,8 +219,27 @@ import Footer from '../components/Footer.astro';
 
       if (selectedPageCount) selectedPageCount.textContent = `${totalPages} page${totalPages === 1 ? '' : 's'}`;
 
-      // Reset to default mode on new upload
-      setSplitMode('by-pages');
+      // Reset range inputs
+      if (rangeStartInput) {
+        rangeStartInput.min = '1';
+        rangeStartInput.max = String(totalPages);
+        rangeStartInput.value = '1';
+      }
+      if (rangeEndInput) {
+        rangeEndInput.min = '1';
+        rangeEndInput.max = String(totalPages);
+        rangeEndInput.value = String(totalPages);
+      }
+
+      trimmerInPage = 1;
+      trimmerOutPage = totalPages;
+      monitorCurrentPage = 1;
+      selectedPagesSet.clear();
+      for (let p = 1; p <= totalPages; p++) {
+        selectedPagesSet.add(p);
+      }
+
+      setSplitMode('equal-parts');
       showState(stateSelected);
     } catch (err: any) {
       console.error('Error loading PDF:', err);
@@ -159,35 +248,49 @@ import Footer from '../components/Footer.astro';
     }
   }
 
-  function setSplitMode(mode: 'by-pages' | 'equal-parts') {
+  const panelRange = document.getElementById('panelRange');
+  const panelByPages = document.getElementById('panelByPages');
+  const panelEqualParts = document.getElementById('panelEqualParts');
+  const partCountInput = document.getElementById('partCountInput') as HTMLInputElement;
+  const planByPagesSentence = document.getElementById('planByPagesSentence');
+  const planEqualSentence = document.getElementById('planEqualSentence');
+
+  function setSplitMode(mode: 'by-pages' | 'equal-parts' | 'page-range') {
     splitMode = mode;
     tabByPages?.classList.toggle('active', mode === 'by-pages');
     tabEqualParts?.classList.toggle('active', mode === 'equal-parts');
+    tabCutRange?.classList.toggle('active', mode === 'page-range');
 
-    if (mode === 'by-pages') {
-      if (splitControlMainLabel) splitControlMainLabel.textContent = 'Pages Per Split Piece';
-      if (splitControlSubLabel) splitControlSubLabel.textContent = 'Type number or drag horizontally to adjust';
-      if (chunkSizeInput) {
-        chunkSizeInput.max = String(totalPages || 999);
-        chunkSizeInput.min = '1';
-        chunkSizeInput.value = String(Math.min(5, totalPages || 5));
-      }
-    } else {
-      if (splitControlMainLabel) splitControlMainLabel.textContent = 'Number of Equal Parts';
-      if (splitControlSubLabel) splitControlSubLabel.textContent = 'Divide total document into this many files';
-      if (chunkSizeInput) {
-        chunkSizeInput.max = String(Math.min(totalPages || 50, 50));
-        chunkSizeInput.min = '2';
-        chunkSizeInput.value = String(Math.min(2, totalPages || 2));
-      }
+    panelRange?.classList.toggle('hidden', mode !== 'page-range');
+    panelByPages?.classList.toggle('hidden', mode !== 'by-pages');
+    panelEqualParts?.classList.toggle('hidden', mode !== 'equal-parts');
+
+    updateLandingSplitPlans();
+  }
+
+  function updateLandingSplitPlans() {
+    if (!totalPages || totalPages <= 0) return;
+
+    // Every N Pages plan update
+    const cSize = chunkSizeInput ? parseInt(chunkSizeInput.value, 10) || 5 : 5;
+    const pagesPlan = computeSplitPlan(totalPages, 'by-pages', { chunkSize: cSize });
+    if (planByPagesSentence) {
+      planByPagesSentence.textContent = `Will create ${pagesPlan.length} file${pagesPlan.length === 1 ? '' : 's'} (${cSize} page${cSize === 1 ? '' : 's'} each, total ${totalPages} pages)`;
     }
 
-    recalculateSplitPlan();
+    // Equal Parts plan update
+    const pCount = partCountInput ? parseInt(partCountInput.value, 10) || 3 : 3;
+    const equalPlan = computeSplitPlan(totalPages, 'equal-parts', { partCount: pCount });
+    if (planEqualSentence) {
+      const avg = Math.ceil(totalPages / pCount);
+      planEqualSentence.textContent = `Will create ${pCount} equal parts (~${avg} pages each, total ${totalPages} pages)`;
+    }
   }
 
   function resetToEmpty() {
     currentFile = null;
     currentBuffer = null;
+    pdfJsDoc = null;
     totalPages = 0;
     currentSplitPlan = [];
     splitResults = [];
@@ -204,20 +307,47 @@ import Footer from '../components/Footer.astro';
     recalculateSplitPlan();
   }
 
+  function setRangeValues(start: number, end: number) {
+    let cleanStart = Math.max(1, Math.min(totalPages || 1, start));
+    let cleanEnd = Math.max(1, Math.min(totalPages || 1, end));
+
+    if (cleanStart > cleanEnd) [cleanStart, cleanEnd] = [cleanEnd, cleanStart];
+
+    if (rangeStartInput) rangeStartInput.value = String(cleanStart);
+    if (rangeEndInput) rangeEndInput.value = String(cleanEnd);
+
+    trimmerInPage = cleanStart;
+    trimmerOutPage = cleanEnd;
+
+    recalculateSplitPlan();
+  }
+
   function recalculateSplitPlan() {
     if (!totalPages || totalPages <= 0) return;
 
-    const val = chunkSizeInput ? parseInt(chunkSizeInput.value, 10) || 1 : 5;
+    if (splitMode === 'page-range') {
+      const fromVal = rangeStartInput ? parseInt(rangeStartInput.value, 10) || 1 : 1;
+      const toVal = rangeEndInput ? parseInt(rangeEndInput.value, 10) || totalPages : totalPages;
 
-    currentSplitPlan = computeSplitPlan(totalPages, splitMode, {
-      chunkSize: val,
-      numParts: val
-    });
+      currentSplitPlan = computeSplitPlan(totalPages, 'page-range', {
+        rangeStart: fromVal,
+        rangeEnd: toVal
+      });
 
-    renderSplitPlanSentence(val);
+      renderSplitPlanSentence();
+    } else {
+      const val = chunkSizeInput ? parseInt(chunkSizeInput.value, 10) || 1 : 5;
+
+      currentSplitPlan = computeSplitPlan(totalPages, splitMode, {
+        chunkSize: val,
+        numParts: val
+      });
+
+      renderSplitPlanSentence(val);
+    }
   }
 
-  function renderSplitPlanSentence(val: number) {
+  function renderSplitPlanSentence(val?: number) {
     if (!planSentenceMain || !planSentenceDetail) return;
 
     const count = currentSplitPlan.length;
@@ -232,7 +362,40 @@ import Footer from '../components/Footer.astro';
 
     if (startSplitBtn) (startSplitBtn as HTMLButtonElement).disabled = false;
 
-    // Headline
+    if (splitMode === 'page-range') {
+      const planItem = currentSplitPlan[0];
+      const pagesSelected = planItem.pageCount;
+      const pagesOmitted = totalPages - pagesSelected;
+
+      planSentenceMain.textContent = `Will extract 1 PDF file (${planItem.pageRangeText})`;
+
+      if (pagesOmitted === 0) {
+        planSentenceDetail.textContent = `Extracting all ${totalPages} pages in a single document`;
+      } else {
+        planSentenceDetail.textContent = `${pagesSelected} page${pagesSelected === 1 ? '' : 's'} included • ${pagesOmitted} page${pagesOmitted === 1 ? '' : 's'} excluded`;
+      }
+
+      if (planSegmentBar) {
+        const from = planItem.fromPage || 1;
+        const to = planItem.toPage || totalPages;
+        const beforeCount = from - 1;
+        const selectedCount = to - from + 1;
+        const afterCount = totalPages - to;
+
+        let barHtml = '';
+        if (beforeCount > 0) {
+          barHtml += `<div class="plan-segment-item is-unselected" style="flex: ${beforeCount};" title="Pages 1–${beforeCount} (Excluded)"></div>`;
+        }
+        barHtml += `<div class="plan-segment-item" style="flex: ${selectedCount};" title="${planItem.pageRangeText} (${selectedCount} pgs - Selected)"></div>`;
+        if (afterCount > 0) {
+          barHtml += `<div class="plan-segment-item is-unselected" style="flex: ${afterCount};" title="Pages ${to + 1}–${totalPages} (Excluded)"></div>`;
+        }
+        planSegmentBar.innerHTML = barHtml;
+      }
+      return;
+    }
+
+    // Headline for chunk modes
     if (splitMode === 'by-pages') {
       planSentenceMain.textContent = `Will create ${count} PDF file${count === 1 ? '' : 's'}`;
     } else {
@@ -257,7 +420,6 @@ import Footer from '../components/Footer.astro';
       planSentenceDetail.textContent = partsText.join('  +  ');
     }
 
-
     if (planSegmentBar) {
       const maxPages = Math.max(...currentSplitPlan.map(p => p.pageCount));
       planSegmentBar.innerHTML = currentSplitPlan.map(item => `
@@ -266,6 +428,524 @@ import Footer from '../components/Footer.astro';
     }
   }
 
+  // ==========================================
+  // Visual Video-Style Trimmer Engine & Events
+  // ==========================================
+
+  async function openVisualTrimmer() {
+    if (!currentBuffer || !currentFile || totalPages <= 0) return;
+
+    isTrimmerOpen = true;
+    if (trimmerDocName) trimmerDocName.textContent = currentFile.name;
+    if (monitorTotalPagesNum) monitorTotalPagesNum.textContent = String(totalPages);
+    if (transportTotal) transportTotal.textContent = String(totalPages).padStart(2, '0');
+
+    // Read initial range from inputs
+    trimmerInPage = parseInt(rangeStartInput?.value || '1', 10) || 1;
+    trimmerOutPage = parseInt(rangeEndInput?.value || String(totalPages), 10) || totalPages;
+
+    undoStack.length = 0;
+    redoStack.length = 0;
+    studioSavedCuts = [];
+    updateStudioCutsQueueUI();
+
+    selectedPagesSet.clear();
+    for (let p = trimmerInPage; p <= trimmerOutPage; p++) {
+      selectedPagesSet.add(p);
+    }
+
+    monitorCurrentPage = trimmerInPage;
+
+    // Lock page scroll
+    document.documentElement.style.overflow = 'hidden';
+    document.body.style.overflow = 'hidden';
+
+    if (visualTrimmerModal) visualTrimmerModal.classList.remove('hidden');
+
+    updateTrimmerHeaderStats();
+    renderTimelineTrackSkeleton();
+
+    // Lazy load PDFJS document
+    try {
+      if (!pdfJsDoc) {
+        if (monitorLoading) monitorLoading.classList.add('active');
+        pdfJsDoc = await getPdfJsDocument(currentBuffer);
+      }
+      setTrimmerMonitorPage(monitorCurrentPage);
+      renderTimelineThumbnails();
+    } catch (e) {
+      console.error('Failed to load PDF in trimmer:', e);
+      if (monitorLoading) monitorLoading.classList.remove('active');
+    }
+  }
+
+  function closeVisualTrimmer() {
+    isTrimmerOpen = false;
+    if (visualTrimmerModal) visualTrimmerModal.classList.add('hidden');
+    document.documentElement.style.overflow = '';
+    document.body.style.overflow = '';
+  }
+
+  async function setTrimmerMonitorPage(pageNum: number) {
+    const selList = getSelectedPagesArray();
+    if (selList.length === 0) return;
+
+    if (!selList.includes(pageNum)) {
+      const closest = selList.reduce((prev, curr) => Math.abs(curr - pageNum) < Math.abs(prev - pageNum) ? curr : prev, selList[0]);
+      pageNum = closest;
+    }
+    monitorCurrentPage = pageNum;
+    resetMonitorZoom();
+
+    const currentIdx = selList.indexOf(pageNum);
+    const totalSelected = selList.length;
+
+    if (monitorCurrentPageNum) monitorCurrentPageNum.textContent = String(pageNum);
+    if (monitorTotalPagesNum) monitorTotalPagesNum.textContent = String(totalPages);
+    if (transportCurrent) transportCurrent.textContent = String(pageNum).padStart(2, '0');
+
+    const monitorSelectedPosition = document.getElementById('monitorSelectedPosition');
+    if (monitorSelectedPosition) {
+      monitorSelectedPosition.textContent = `${currentIdx + 1} of ${totalSelected}`;
+    }
+
+    if (btnMonitorPrev) {
+      (btnMonitorPrev as HTMLButtonElement).disabled = currentIdx <= 0;
+    }
+    if (btnMonitorNext) {
+      (btnMonitorNext as HTMLButtonElement).disabled = currentIdx >= totalSelected - 1;
+    }
+
+    highlightActiveTimelineCard();
+
+    if (!pdfJsDoc || !trimmerMonitorCanvas) return;
+
+    try {
+      if (monitorLoading) monitorLoading.classList.add('active');
+      const targetW = Math.min(1200, Math.max(900, Math.floor(window.innerWidth * 0.75)));
+      await renderPageToCanvas(pdfJsDoc, pageNum, trimmerMonitorCanvas, targetW);
+    } catch (err) {
+      console.warn('Monitor render page error:', err);
+    } finally {
+      if (monitorLoading) monitorLoading.classList.remove('active');
+    }
+  }
+
+  // Monitor Zoom & Pan System
+  let monitorZoom = 1;
+  let monitorPanX = 0;
+  let monitorPanY = 0;
+  let isMonitorPanning = false;
+  let monitorPanStartX = 0;
+  let monitorPanStartY = 0;
+
+  function applyMonitorTransform() {
+    if (!monitorScreen) return;
+    monitorScreen.style.transform = `scale(${monitorZoom}) translate(${monitorPanX / monitorZoom}px, ${monitorPanY / monitorZoom}px)`;
+    const zoomLevelPill = document.getElementById('zoomLevelPill');
+    if (zoomLevelPill) {
+      zoomLevelPill.textContent = `${Math.round(monitorZoom * 100)}%`;
+    }
+    const monitorContainer = document.querySelector('.trimmer-monitor-container');
+    if (monitorContainer) {
+      monitorContainer.classList.toggle('is-zoomed', monitorZoom > 1.01);
+    }
+    monitorScreen.classList.toggle('is-zoomed', monitorZoom > 1.01);
+  }
+
+  function resetMonitorZoom() {
+    monitorZoom = 1;
+    monitorPanX = 0;
+    monitorPanY = 0;
+    applyMonitorTransform();
+  }
+
+  function toggleStudioFullscreen() {
+    if (!document.fullscreenElement) {
+      visualTrimmerModal?.requestFullscreen?.().catch(() => {});
+    } else {
+      document.exitFullscreen?.().catch(() => {});
+    }
+  }
+
+  function navigateTrimmerPrev() {
+    const selList = getSelectedPagesArray();
+    const currentIdx = selList.indexOf(monitorCurrentPage);
+    if (currentIdx > 0) {
+      setTrimmerMonitorPage(selList[currentIdx - 1]);
+    }
+  }
+
+  function navigateTrimmerNext() {
+    const selList = getSelectedPagesArray();
+    const currentIdx = selList.indexOf(monitorCurrentPage);
+    if (currentIdx >= 0 && currentIdx < selList.length - 1) {
+      setTrimmerMonitorPage(selList[currentIdx + 1]);
+    }
+  }
+
+  // Studio Undo & Redo History System
+  interface StudioHistoryState {
+    selectedPages: number[];
+    inPage: number;
+    outPage: number;
+    monitorPage: number;
+  }
+
+  const undoStack: StudioHistoryState[] = [];
+  const redoStack: StudioHistoryState[] = [];
+
+  function recordHistorySnapshot() {
+    undoStack.push({
+      selectedPages: Array.from(selectedPagesSet),
+      inPage: trimmerInPage,
+      outPage: trimmerOutPage,
+      monitorPage: monitorCurrentPage
+    });
+    if (undoStack.length > 50) undoStack.shift();
+    redoStack.length = 0;
+  }
+
+  function applyHistoryState(state: StudioHistoryState) {
+    selectedPagesSet.clear();
+    for (const p of state.selectedPages) selectedPagesSet.add(p);
+    trimmerInPage = state.inPage;
+    trimmerOutPage = state.outPage;
+    syncTrimmerRange();
+    setTrimmerMonitorPage(state.monitorPage);
+  }
+
+  function undoStudioAction() {
+    if (undoStack.length === 0) return;
+    const currentState: StudioHistoryState = {
+      selectedPages: Array.from(selectedPagesSet),
+      inPage: trimmerInPage,
+      outPage: trimmerOutPage,
+      monitorPage: monitorCurrentPage
+    };
+    redoStack.push(currentState);
+    const prevState = undoStack.pop()!;
+    applyHistoryState(prevState);
+  }
+
+  function redoStudioAction() {
+    if (redoStack.length === 0) return;
+    const currentState: StudioHistoryState = {
+      selectedPages: Array.from(selectedPagesSet),
+      inPage: trimmerInPage,
+      outPage: trimmerOutPage,
+      monitorPage: monitorCurrentPage
+    };
+    undoStack.push(currentState);
+    const nextState = redoStack.pop()!;
+    applyHistoryState(nextState);
+  }
+
+  function setTrimmerIn(pageNum: number) {
+    recordHistorySnapshot();
+    pageNum = Math.max(1, Math.min(totalPages, pageNum));
+    if (pageNum > trimmerOutPage) {
+      trimmerOutPage = pageNum;
+    }
+    trimmerInPage = pageNum;
+
+    selectedPagesSet.clear();
+    for (let p = trimmerInPage; p <= trimmerOutPage; p++) {
+      selectedPagesSet.add(p);
+    }
+
+    syncTrimmerRange();
+    setTrimmerMonitorPage(pageNum);
+  }
+
+  function setTrimmerOut(pageNum: number) {
+    recordHistorySnapshot();
+    pageNum = Math.max(1, Math.min(totalPages, pageNum));
+    if (pageNum < trimmerInPage) {
+      trimmerInPage = pageNum;
+    }
+    trimmerOutPage = pageNum;
+
+    selectedPagesSet.clear();
+    for (let p = trimmerInPage; p <= trimmerOutPage; p++) {
+      selectedPagesSet.add(p);
+    }
+
+    syncTrimmerRange();
+    setTrimmerMonitorPage(pageNum);
+  }
+
+  function togglePageSelection(pageNum: number) {
+    recordHistorySnapshot();
+    if (selectedPagesSet.has(pageNum)) {
+      if (selectedPagesSet.size > 1) {
+        selectedPagesSet.delete(pageNum);
+      }
+    } else {
+      selectedPagesSet.add(pageNum);
+    }
+
+    const selList = getSelectedPagesArray();
+    trimmerInPage = selList[0];
+    trimmerOutPage = selList[selList.length - 1];
+
+    syncTrimmerRange();
+
+    if (!selectedPagesSet.has(monitorCurrentPage)) {
+      setTrimmerMonitorPage(pageNum);
+    } else {
+      setTrimmerMonitorPage(monitorCurrentPage);
+    }
+  }
+
+  function syncTrimmerRange() {
+    setRangeValues(trimmerInPage, trimmerOutPage);
+    updateTrimmerHeaderStats();
+    updateTimelineCardsCutState();
+  }
+
+  function updateTrimmerHeaderStats() {
+    const selList = getSelectedPagesArray();
+    const selCount = selList.length;
+    const omittedCount = totalPages - selCount;
+
+    const isContiguous = selList.every((p, i) => i === 0 || p === selList[i - 1] + 1);
+
+    if (trimmerRangePill) {
+      if (isContiguous) {
+        trimmerRangePill.textContent = selList[0] === selList[selList.length - 1]
+          ? `Page ${selList[0]}`
+          : `Pages ${selList[0]} – ${selList[selList.length - 1]}`;
+      } else {
+        trimmerRangePill.textContent = `${selCount} Selected`;
+      }
+    }
+    if (trimmerRangeDetail) {
+      trimmerRangeDetail.textContent = `${selCount} page${selCount === 1 ? '' : 's'} selected`;
+    }
+    const omittedEl = document.getElementById('trimmerOmittedDetail');
+    if (omittedEl) {
+      omittedEl.textContent = omittedCount > 0 ? `(${omittedCount} omitted)` : '';
+    }
+  }
+
+  function renderTimelineTrackSkeleton() {
+    if (!timelineTrack) return;
+    timelineTrack.innerHTML = Array.from({ length: totalPages }, (_, i) => {
+      const p = i + 1;
+      const isIn = selectedPagesSet.has(p);
+      return `
+        <div class="timeline-page-card ${isIn ? 'is-in-cut' : 'is-excluded'}" id="tlCard-${p}" data-page="${p}">
+          <div class="card-toggle-check" id="tlToggle-${p}">${isIn ? '✓' : ''}</div>
+          <canvas class="page-thumb-canvas" id="tlCanvas-${p}"></canvas>
+          <span class="page-badge-chip">${p}</span>
+          ${p === trimmerInPage ? '<span class="in-marker-flag">IN</span>' : ''}
+          ${p === trimmerOutPage ? '<span class="out-marker-flag">OUT</span>' : ''}
+        </div>
+      `;
+    }).join('');
+
+    // Attach click listeners to cards and toggle buttons
+    for (let p = 1; p <= totalPages; p++) {
+      const card = document.getElementById(`tlCard-${p}`);
+      const toggleBtn = document.getElementById(`tlToggle-${p}`);
+
+      toggleBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        togglePageSelection(p);
+      });
+
+      card?.addEventListener('click', () => {
+        if (selectedPagesSet.has(p)) {
+          setTrimmerMonitorPage(p);
+        } else {
+          togglePageSelection(p);
+          setTrimmerMonitorPage(p);
+        }
+      });
+    }
+  }
+
+  async function renderTimelineThumbnails() {
+    if (!pdfJsDoc) return;
+    for (let p = 1; p <= totalPages; p++) {
+      const canvas = document.getElementById(`tlCanvas-${p}`) as HTMLCanvasElement;
+      if (canvas) {
+        try {
+          await renderPageToCanvas(pdfJsDoc, p, canvas, 130);
+        } catch (e) {
+          console.warn(`Failed thumb for page ${p}:`, e);
+        }
+      }
+    }
+  }
+
+  function highlightActiveTimelineCard() {
+    for (let p = 1; p <= totalPages; p++) {
+      const card = document.getElementById(`tlCard-${p}`);
+      if (card) {
+        card.classList.toggle('is-current', p === monitorCurrentPage);
+      }
+    }
+    // Scroll card into view inside timeline track
+    const activeCard = document.getElementById(`tlCard-${monitorCurrentPage}`);
+    if (activeCard && timelineScrollWrapper) {
+      const wrapperRect = timelineScrollWrapper.getBoundingClientRect();
+      const cardRect = activeCard.getBoundingClientRect();
+      if (cardRect.left < wrapperRect.left || cardRect.right > wrapperRect.right) {
+        activeCard.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+      }
+    }
+  }
+
+  function updateTimelineCardsCutState() {
+    for (let p = 1; p <= totalPages; p++) {
+      const card = document.getElementById(`tlCard-${p}`);
+      if (card) {
+        const isIn = selectedPagesSet.has(p);
+        card.classList.toggle('is-in-cut', isIn);
+        card.classList.toggle('is-excluded', !isIn);
+
+        const toggleEl = document.getElementById(`tlToggle-${p}`);
+        if (toggleEl) {
+          toggleEl.textContent = isIn ? '✓' : '';
+        }
+
+        // Update In/Out flags
+        const oldIn = card.querySelector('.in-marker-flag');
+        const oldOut = card.querySelector('.out-marker-flag');
+        if (oldIn) oldIn.remove();
+        if (oldOut) oldOut.remove();
+
+        if (p === trimmerInPage) {
+          const inFlag = document.createElement('span');
+          inFlag.className = 'in-marker-flag';
+          inFlag.textContent = 'IN';
+          card.appendChild(inFlag);
+        }
+        if (p === trimmerOutPage) {
+          const outFlag = document.createElement('span');
+          outFlag.className = 'out-marker-flag';
+          outFlag.textContent = 'OUT';
+          card.appendChild(outFlag);
+        }
+      }
+    }
+  }
+
+  // Studio Multi-Mode Engine
+  // Multi-Piece Studio Split Queue System
+  interface SavedStudioCut {
+    id: string;
+    pageIndices: number[]; // 0-based
+    pages: number[]; // 1-based
+    pageRangeText: string;
+  }
+  let studioSavedCuts: SavedStudioCut[] = [];
+
+  function updateStudioCutsQueueUI() {
+    const overviewEl = document.getElementById('studioPartsOverview');
+    const trackEl = document.getElementById('studioPartsTrack');
+    const btnApplyText = document.getElementById('btnApplyCutText');
+
+    if (!overviewEl || !trackEl) return;
+
+    if (studioSavedCuts.length === 0) {
+      overviewEl.classList.remove('has-cuts');
+      trackEl.innerHTML = '';
+      if (btnApplyText) btnApplyText.textContent = 'Apply & Cut PDF';
+      return;
+    }
+
+    overviewEl.classList.add('has-cuts');
+    trackEl.innerHTML = `
+      <span class="queue-label">Saved Splits (${studioSavedCuts.length}):</span>
+      ${studioSavedCuts.map((cut, idx) => `
+        <div class="saved-cut-chip" data-cut-id="${cut.id}">
+          <span>Part ${idx + 1}: ${cut.pageRangeText} (${cut.pages.length}p)</span>
+          <button type="button" class="btn-del-cut" data-del-id="${cut.id}">✕</button>
+        </div>
+      `).join('')}
+    `;
+
+    if (btnApplyText) {
+      btnApplyText.textContent = `Apply & Cut (${studioSavedCuts.length} file${studioSavedCuts.length === 1 ? '' : 's'})`;
+    }
+
+    // Wire delete buttons
+    trackEl.querySelectorAll('.btn-del-cut').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const cutId = (btn as HTMLElement).getAttribute('data-del-id');
+        studioSavedCuts = studioSavedCuts.filter(c => c.id !== cutId);
+        updateStudioCutsQueueUI();
+      });
+    });
+
+    // Wire chip click to view/restore piece
+    trackEl.querySelectorAll('.saved-cut-chip').forEach(chip => {
+      chip.addEventListener('click', () => {
+        const cutId = (chip as HTMLElement).getAttribute('data-cut-id');
+        const cut = studioSavedCuts.find(c => c.id === cutId);
+        if (cut) {
+          selectedPagesSet.clear();
+          for (const p of cut.pages) selectedPagesSet.add(p);
+          trimmerInPage = cut.pages[0];
+          trimmerOutPage = cut.pages[cut.pages.length - 1];
+          syncTrimmerRange();
+          setTrimmerMonitorPage(cut.pages[0]);
+        }
+      });
+    });
+  }
+
+  function addCurrentSelectionToQueue() {
+    const selList = getSelectedPagesArray();
+    if (selList.length === 0) return;
+
+    const startP = selList[0];
+    const endP = selList[selList.length - 1];
+    const rangeText = selList.length === (endP - startP + 1)
+      ? (startP === endP ? `Page ${startP}` : `Pages ${startP}–${endP}`)
+      : `${selList.length} Selected Pages`;
+
+    const newCut: SavedStudioCut = {
+      id: 'cut-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+      pageIndices: selList.map(p => p - 1),
+      pages: [...selList],
+      pageRangeText: rangeText
+    };
+
+    studioSavedCuts.push(newCut);
+    updateStudioCutsQueueUI();
+  }
+
+  async function applyTrimmerCut() {
+    closeVisualTrimmer();
+    if (studioSavedCuts.length > 0) {
+      currentSplitPlan = studioSavedCuts.map((cut, idx) => ({
+        partIndex: idx + 1,
+        pageIndices: cut.pageIndices,
+        label: `Part ${idx + 1} (${cut.pageRangeText})`,
+        pageRangeText: cut.pageRangeText,
+        pageCount: cut.pageIndices.length
+      }));
+    } else {
+      const selList = getSelectedPagesArray();
+      if (selList.length > 0) {
+        currentSplitPlan = computeSplitPlan(totalPages, 'page-range', {
+          selectedPages: selList,
+          rangeStart: selList[0],
+          rangeEnd: selList[selList.length - 1]
+        });
+      }
+    }
+    startSplitting();
+  }
+
+  // ==========================================
+  // Split Execution & Results
+  // ==========================================
 
   async function startSplitting() {
     if (!currentBuffer || !currentFile || currentSplitPlan.length === 0) return;
@@ -439,7 +1119,6 @@ import Footer from '../components/Footer.astro';
     document.body.style.overflow = '';
   }
 
-
   function formatBytes(bytes: number): string {
     if (bytes === 0) return '0 B';
     const k = 1024;
@@ -454,9 +1133,179 @@ import Footer from '../components/Footer.astro';
     // Initial state setup: show only dropzone
     showState(stateEmpty);
 
-    // Mode switch tabs
+    // Landing Mode switch tabs
     tabByPages?.addEventListener('click', () => setSplitMode('by-pages'));
     tabEqualParts?.addEventListener('click', () => setSplitMode('equal-parts'));
+    tabCutRange?.addEventListener('click', () => setSplitMode('page-range'));
+
+    // Landing Steppers for Every N Pages
+    const landingChunkInput = document.getElementById('chunkSizeInput') as HTMLInputElement;
+    document.getElementById('btnLandingPagesDec')?.addEventListener('click', () => {
+      if (landingChunkInput) {
+        landingChunkInput.value = String(Math.max(1, (parseInt(landingChunkInput.value, 10) || 5) - 1));
+        updateLandingSplitPlans();
+      }
+    });
+    document.getElementById('btnLandingPagesInc')?.addEventListener('click', () => {
+      if (landingChunkInput) {
+        landingChunkInput.value = String(Math.min(totalPages, (parseInt(landingChunkInput.value, 10) || 5) + 1));
+        updateLandingSplitPlans();
+      }
+    });
+    landingChunkInput?.addEventListener('input', updateLandingSplitPlans);
+
+    // Landing Steppers for Equal Parts
+    const landingPartInput = document.getElementById('partCountInput') as HTMLInputElement;
+    document.getElementById('btnLandingEqualDec')?.addEventListener('click', () => {
+      if (landingPartInput) {
+        landingPartInput.value = String(Math.max(2, (parseInt(landingPartInput.value, 10) || 3) - 1));
+        updateLandingSplitPlans();
+      }
+    });
+    document.getElementById('btnLandingEqualInc')?.addEventListener('click', () => {
+      if (landingPartInput) {
+        landingPartInput.value = String(Math.min(totalPages, (parseInt(landingPartInput.value, 10) || 3) + 1));
+        updateLandingSplitPlans();
+      }
+    });
+    landingPartInput?.addEventListener('input', updateLandingSplitPlans);
+
+    // Fast Split Actions
+    document.getElementById('btnFastSplitPages')?.addEventListener('click', () => {
+      const cSize = landingChunkInput ? parseInt(landingChunkInput.value, 10) || 5 : 5;
+      currentSplitPlan = computeSplitPlan(totalPages, 'by-pages', { chunkSize: cSize });
+      startSplitting();
+    });
+
+    document.getElementById('btnFastSplitEqual')?.addEventListener('click', () => {
+      const pCount = landingPartInput ? parseInt(landingPartInput.value, 10) || 3 : 3;
+      currentSplitPlan = computeSplitPlan(totalPages, 'equal-parts', { partCount: pCount });
+      startSplitting();
+    });
+
+    // Launch Video Trimmer
+    btnLaunchVisualTrimmer?.addEventListener('click', openVisualTrimmer);
+    btnCancelTrimmer?.addEventListener('click', closeVisualTrimmer);
+    btnApplyCut?.addEventListener('click', applyTrimmerCut);
+    document.getElementById('btnAddCutPiece')?.addEventListener('click', addCurrentSelectionToQueue);
+
+    // Trimmer Monitor navigation
+    btnMonitorPrev?.addEventListener('click', navigateTrimmerPrev);
+    btnMonitorNext?.addEventListener('click', navigateTrimmerNext);
+
+    // Trimmer Mark In / Mark Out / Reset
+    btnMarkIn?.addEventListener('click', () => setTrimmerIn(monitorCurrentPage));
+    btnMarkOut?.addEventListener('click', () => setTrimmerOut(monitorCurrentPage));
+    btnResetRange?.addEventListener('click', () => {
+      recordHistorySnapshot();
+      trimmerInPage = 1;
+      trimmerOutPage = totalPages;
+      selectedPagesSet.clear();
+      for (let p = 1; p <= totalPages; p++) selectedPagesSet.add(p);
+      syncTrimmerRange();
+      setTrimmerMonitorPage(1);
+    });
+
+    // Undo / Redo Buttons in Transport Bar
+    document.getElementById('btnStudioUndo')?.addEventListener('click', undoStudioAction);
+    document.getElementById('btnStudioRedo')?.addEventListener('click', redoStudioAction);
+
+    // Monitor Zoom & Pan Controls
+    const btnZoomIn = document.getElementById('btnZoomIn');
+    const btnZoomOut = document.getElementById('btnZoomOut');
+    const zoomLevelPill = document.getElementById('zoomLevelPill');
+    const btnToggleFullscreen = document.getElementById('btnToggleFullscreen');
+
+    btnZoomIn?.addEventListener('click', () => {
+      monitorZoom = Math.min(3.5, Number((monitorZoom + 0.25).toFixed(2)));
+      applyMonitorTransform();
+    });
+
+    btnZoomOut?.addEventListener('click', () => {
+      monitorZoom = Math.max(1, Number((monitorZoom - 0.25).toFixed(2)));
+      if (monitorZoom <= 1.01) {
+        monitorPanX = 0;
+        monitorPanY = 0;
+      }
+      applyMonitorTransform();
+    });
+
+    zoomLevelPill?.addEventListener('click', resetMonitorZoom);
+    btnToggleFullscreen?.addEventListener('click', toggleStudioFullscreen);
+
+    const btnExitFullscreen = document.getElementById('btnExitFullscreen');
+    btnExitFullscreen?.addEventListener('click', () => {
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      } else {
+        visualTrimmerModal?.classList.remove('is-fullscreen');
+      }
+    });
+
+    document.addEventListener('fullscreenchange', () => {
+      const isFs = !!document.fullscreenElement;
+      visualTrimmerModal?.classList.toggle('is-fullscreen', isFs);
+      resetMonitorZoom();
+      if (pdfJsDoc && trimmerMonitorCanvas && isTrimmerOpen) {
+        const targetW = isFs ? Math.floor(window.innerWidth * 1.5) : Math.min(1200, Math.floor(window.innerWidth * 0.75));
+        renderPageToCanvas(pdfJsDoc, monitorCurrentPage, trimmerMonitorCanvas, targetW);
+      }
+    });
+
+    const monitorContainer = document.querySelector('.trimmer-monitor-container') as HTMLElement;
+
+    // Mouse wheel zoom on full Monitor Stage
+    monitorContainer?.addEventListener('wheel', (e) => {
+      if ((e.target as HTMLElement).closest('.btn-monitor-tool, .zoom-level-pill, .monitor-nav-btn')) return;
+      e.preventDefault();
+      const delta = e.deltaY < 0 ? 0.18 : -0.18;
+      monitorZoom = Math.min(3.5, Math.max(1, Number((monitorZoom + delta).toFixed(2))));
+      if (monitorZoom <= 1.01) {
+        monitorPanX = 0;
+        monitorPanY = 0;
+      }
+      applyMonitorTransform();
+    }, { passive: false });
+
+    // Double click to toggle 100% <-> 200% zoom
+    monitorContainer?.addEventListener('dblclick', (e) => {
+      if ((e.target as HTMLElement).closest('.btn-monitor-tool, .zoom-level-pill, .monitor-nav-btn')) return;
+      if (monitorZoom > 1.01) {
+        resetMonitorZoom();
+      } else {
+        monitorZoom = 2;
+        applyMonitorTransform();
+      }
+    });
+
+    // Drag-to-pan when zoomed in
+    monitorContainer?.addEventListener('mousedown', (e) => {
+      if ((e.target as HTMLElement).closest('.btn-monitor-tool, .zoom-level-pill, .monitor-nav-btn')) return;
+      if (monitorZoom > 1.01) {
+        isMonitorPanning = true;
+        monitorPanStartX = e.clientX - monitorPanX;
+        monitorPanStartY = e.clientY - monitorPanY;
+      }
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!isMonitorPanning) return;
+      monitorPanX = e.clientX - monitorPanStartX;
+      monitorPanY = e.clientY - monitorPanStartY;
+      applyMonitorTransform();
+    });
+
+    document.addEventListener('mouseup', () => {
+      isMonitorPanning = false;
+    });
+
+    // Horizontal wheel scrolling on Timeline
+    timelineScrollWrapper?.addEventListener('wheel', (e) => {
+      if (e.deltaY !== 0) {
+        e.preventDefault();
+        timelineScrollWrapper.scrollLeft -= e.deltaY;
+      }
+    }, { passive: false });
 
     // Drag & Drop
     ['dragenter', 'dragover'].forEach(name => {
@@ -609,8 +1458,81 @@ import Footer from '../components/Footer.astro';
       }
     });
 
-    // Global escape key handler to close modals
+    // Global keyboard shortcuts (including Video Trimmer studio shortcuts)
     document.addEventListener('keydown', (e) => {
+      if (isTrimmerOpen) {
+        // Prevent key defaults for editor shortcuts if not typing in an input
+        const isTyping = ['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName);
+
+        if (!isTyping) {
+          const isCtrlOrCmd = e.ctrlKey || e.metaKey;
+          if (isCtrlOrCmd) {
+            if (e.key === 'z' || e.key === 'Z') {
+              e.preventDefault();
+              if (e.shiftKey) {
+                redoStudioAction();
+              } else {
+                undoStudioAction();
+              }
+              return;
+            } else if (e.key === 'y' || e.key === 'Y') {
+              e.preventDefault();
+              redoStudioAction();
+              return;
+            }
+          }
+
+          if (e.key === '[' || e.key === 'i' || e.key === 'I') {
+            e.preventDefault();
+            setTrimmerIn(monitorCurrentPage);
+          } else if (e.key === ']' || e.key === 'o' || e.key === 'O') {
+            e.preventDefault();
+            setTrimmerOut(monitorCurrentPage);
+          } else if (e.key === 'ArrowLeft') {
+            e.preventDefault();
+            navigateTrimmerPrev();
+          } else if (e.key === 'ArrowRight') {
+            e.preventDefault();
+            navigateTrimmerNext();
+          } else if (e.key === 'Home') {
+            e.preventDefault();
+            const selList = getSelectedPagesArray();
+            if (selList.length > 0) setTrimmerMonitorPage(selList[0]);
+          } else if (e.key === 'f' || e.key === 'F') {
+            e.preventDefault();
+            toggleStudioFullscreen();
+          } else if (e.key === '+' || e.key === '=') {
+            e.preventDefault();
+            monitorZoom = Math.min(3.5, Number((monitorZoom + 0.25).toFixed(2)));
+            applyMonitorTransform();
+          } else if (e.key === '-' || e.key === '_') {
+            e.preventDefault();
+            monitorZoom = Math.max(1, Number((monitorZoom - 0.25).toFixed(2)));
+            if (monitorZoom <= 1.01) {
+              monitorPanX = 0;
+              monitorPanY = 0;
+            }
+            applyMonitorTransform();
+          } else if (e.key === '0') {
+            e.preventDefault();
+            resetMonitorZoom();
+          }
+        }
+
+        if (e.key === 'Escape') {
+          if (document.fullscreenElement || visualTrimmerModal?.classList.contains('is-fullscreen')) {
+            if (document.fullscreenElement) {
+              document.exitFullscreen().catch(() => {});
+            } else {
+              visualTrimmerModal?.classList.remove('is-fullscreen');
+            }
+            return;
+          }
+          closeVisualTrimmer();
+        }
+        return;
+      }
+
       if (e.key === 'Escape') {
         if (confirmModal && !confirmModal.classList.contains('hidden')) {
           confirmModal.classList.add('hidden');

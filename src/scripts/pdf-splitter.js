@@ -61,12 +61,14 @@ export function computeSplitPlan(totalPages, mode = 'by-pages', options = {}) {
       });
     }
   } else if (mode === 'equal-parts') {
-    const numParts = Math.min(totalPages, Math.max(2, parseInt(options.numParts, 10) || 2));
-    const pagesPerPart = Math.ceil(totalPages / numParts);
+    const desiredParts = Math.min(totalPages, Math.max(2, parseInt(options.numParts || options.partCount, 10) || 2));
+    const baseSize = Math.floor(totalPages / desiredParts);
+    const remainder = totalPages % desiredParts;
     let startPage = 1;
 
-    for (let partNum = 1; partNum <= numParts && startPage <= totalPages; partNum++) {
-      const endPage = Math.min(startPage + pagesPerPart - 1, totalPages);
+    for (let partNum = 1; partNum <= desiredParts && startPage <= totalPages; partNum++) {
+      const currentPartSize = baseSize + (partNum <= remainder ? 1 : 0);
+      const endPage = Math.min(startPage + currentPartSize - 1, totalPages);
       const pageIndices = [];
       for (let p = startPage; p <= endPage; p++) {
         pageIndices.push(p - 1);
@@ -82,6 +84,47 @@ export function computeSplitPlan(totalPages, mode = 'by-pages', options = {}) {
       });
 
       startPage = endPage + 1;
+    }
+  } else if (mode === 'page-range') {
+    let pageIndices = [];
+    if (Array.isArray(options.selectedPages) && options.selectedPages.length > 0) {
+      const sortedUnique = [...new Set(options.selectedPages.map(p => parseInt(p, 10)))]
+        .filter(p => !isNaN(p) && p >= 1 && p <= totalPages)
+        .sort((a, b) => a - b);
+      pageIndices = sortedUnique.map(p => p - 1);
+    } else {
+      let from = parseInt(options.rangeStart, 10);
+      let to = parseInt(options.rangeEnd, 10);
+
+      if (isNaN(from)) from = 1;
+      if (isNaN(to)) to = totalPages;
+
+      if (from > to) [from, to] = [to, from];
+      from = Math.max(1, Math.min(from, totalPages));
+      to = Math.max(1, Math.min(to, totalPages));
+
+      for (let p = from; p <= to; p++) {
+        pageIndices.push(p - 1);
+      }
+    }
+
+    if (pageIndices.length > 0) {
+      const firstPage = pageIndices[0] + 1;
+      const lastPage = pageIndices[pageIndices.length - 1] + 1;
+      const isContiguous = pageIndices.every((idx, i) => i === 0 || idx === pageIndices[i - 1] + 1);
+      const rangeText = isContiguous
+        ? (firstPage === lastPage ? `Page ${firstPage}` : `Pages ${firstPage}–${lastPage}`)
+        : `${pageIndices.length} Selected Pages`;
+
+      plan.push({
+        partIndex: 1,
+        pageIndices,
+        label: `Selection`,
+        pageRangeText: rangeText,
+        pageCount: pageIndices.length,
+        fromPage: firstPage,
+        toPage: lastPage
+      });
     }
   } else if (mode === 'custom-ranges') {
     const rawInput = (options.customRanges || '').trim();
@@ -113,7 +156,9 @@ export function computeSplitPlan(totalPages, mode = 'by-pages', options = {}) {
             pageIndices,
             label: `Part ${partNum}`,
             pageRangeText: from === to ? `Page ${from}` : `Pages ${from}–${to}`,
-            pageCount: pageIndices.length
+            pageCount: pageIndices.length,
+            fromPage: from,
+            toPage: to
           });
           partNum++;
         }
@@ -125,7 +170,9 @@ export function computeSplitPlan(totalPages, mode = 'by-pages', options = {}) {
             pageIndices: [page - 1],
             label: `Part ${partNum}`,
             pageRangeText: `Page ${page}`,
-            pageCount: 1
+            pageCount: 1,
+            fromPage: page,
+            toPage: page
           });
           partNum++;
         }

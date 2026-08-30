@@ -2,79 +2,118 @@
 // src/components/FileCard.astro
 ---
 <div class="state-view hidden" id="stateSelected">
-  <div class="file-info-card">
-    <div class="file-icon-box">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-        <polyline points="14 2 14 8 20 8"></polyline>
-        <line x1="16" y1="13" x2="8" y2="13"></line>
-        <line x1="16" y1="17" x2="8" y2="17"></line>
-      </svg>
+  <div class="file-split-window">
+    <!-- File Info Top Bar -->
+    <div class="file-info-card">
+      <div class="file-icon-box">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+          <polyline points="14 2 14 8 20 8"></polyline>
+          <line x1="16" y1="13" x2="8" y2="13"></line>
+          <line x1="16" y1="17" x2="8" y2="17"></line>
+        </svg>
+      </div>
+      <div class="file-details">
+        <div class="file-name" id="selectedFileName">document.pdf</div>
+        <div class="file-meta">
+          <span id="selectedFileSize">0 MB</span>
+          <span class="meta-dot">•</span>
+          <span id="selectedPageCount">0 pages</span>
+        </div>
+      </div>
+      <button type="button" class="btn btn-secondary btn-sm btn-change-file" id="changeFileBtn">
+        <span>Change File</span>
+      </button>
     </div>
-    <div class="file-details">
-      <div class="file-name" id="selectedFileName">document.pdf</div>
-      <div class="file-meta">
-        <span id="selectedFileSize">0 MB</span>
-        <span class="meta-dot">•</span>
-        <span id="selectedPageCount">0 pages</span>
+
+    <!-- Mode Selector Tabs -->
+    <!-- Mode Selector Tabs: 1. Equal Parts, 2. Every N Pages, 3. Studio -->
+    <div class="split-mode-nav">
+      <button type="button" class="mode-tab-btn active" id="tabEqualParts" data-mode="equal-parts">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="6" cy="6" r="3"></circle>
+          <circle cx="6" cy="18" r="3"></circle>
+          <line x1="20" y1="4" x2="8.12" y2="15.88"></line>
+          <line x1="14.47" y1="14.48" x2="20" y2="20"></line>
+          <line x1="8.12" y1="8.12" x2="12" y2="12"></line>
+        </svg>
+        <span>Equal Parts</span>
+      </button>
+
+      <button type="button" class="mode-tab-btn" id="tabByPages" data-mode="by-pages">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+          <polyline points="14 2 14 8 20 8"></polyline>
+          <line x1="10" y1="12" x2="14" y2="12"></line>
+        </svg>
+        <span>Every N Pages</span>
+      </button>
+
+      <button type="button" class="mode-tab-btn" id="tabCutRange" data-mode="page-range">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polygon points="23 7 16 12 23 17 23 7"></polygon>
+          <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+        </svg>
+        <span>Studio</span>
+      </button>
+    </div>
+
+    <!-- Hidden state elements -->
+    <input type="hidden" id="rangeStartInput" value="1" />
+    <input type="hidden" id="rangeEndInput" value="1" />
+
+    <!-- Mode Configuration Panels -->
+    <div class="mode-panel-container">
+      <!-- 1. Equal Parts Panel (Default) -->
+      <div class="mode-panel active" id="panelEqualParts">
+        <div class="stepper-row">
+          <span class="stepper-label">Divide into:</span>
+          <div class="landing-stepper">
+            <button type="button" class="stepper-btn" id="btnLandingEqualDec">−</button>
+            <input type="number" id="partCountInput" class="stepper-input" value="3" min="2" />
+            <button type="button" class="stepper-btn" id="btnLandingEqualInc">+</button>
+          </div>
+          <span class="stepper-unit">equal parts</span>
+        </div>
+        <div class="split-plan-badge" id="planEqualSentence">Will create 3 equal parts (~13 pages each)</div>
+        <button type="button" class="btn btn-primary btn-fast-split" id="btnFastSplitEqual">
+          <span>Split PDF Now</span>
+        </button>
+      </div>
+
+      <!-- 2. Every N Pages Panel -->
+      <div class="mode-panel hidden" id="panelByPages">
+        <div class="stepper-row">
+          <span class="stepper-label">Split every:</span>
+          <div class="landing-stepper">
+            <button type="button" class="stepper-btn" id="btnLandingPagesDec">−</button>
+            <input type="number" id="chunkSizeInput" class="stepper-input" value="5" min="1" />
+            <button type="button" class="stepper-btn" id="btnLandingPagesInc">+</button>
+          </div>
+          <span class="stepper-unit">pages per file</span>
+        </div>
+        <div class="split-plan-badge" id="planByPagesSentence">Will create 8 files (5 pages each)</div>
+        <button type="button" class="btn btn-primary btn-fast-split" id="btnFastSplitPages">
+          <span>Split PDF Now</span>
+        </button>
+      </div>
+
+      <!-- 3. Studio Panel -->
+      <div class="mode-panel hidden" id="panelRange">
+        <p class="mode-panel-desc">Visually preview, scrub pages, set in/out points, and pick individual pages in Timeline Studio.</p>
+        <button type="button" class="btn btn-primary btn-launch-studio" id="btnLaunchVisualTrimmer">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <polygon points="23 7 16 12 23 17 23 7"></polygon>
+            <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+          </svg>
+          <span>Open Studio</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="arrow-right-icon">
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+            <polyline points="12 5 19 12 12 19"></polyline>
+          </svg>
+        </button>
       </div>
     </div>
-    <button type="button" class="btn-icon-subtle" id="removeFileBtn" title="Remove file" aria-label="Remove file">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <line x1="18" y1="6" x2="6" y2="18"></line>
-        <line x1="6" y1="6" x2="18" y2="18"></line>
-      </svg>
-    </button>
-  </div>
-
-  <!-- Segmented Mode Switcher -->
-  <div class="split-mode-tabs">
-    <button type="button" class="split-tab active" id="tabByPages" data-mode="by-pages">Pages Per Piece</button>
-    <button type="button" class="split-tab" id="tabEqualParts" data-mode="equal-parts">Number of Parts</button>
-  </div>
-
-  <!-- Split Controls -->
-  <div class="split-controls-container" id="controlByPages">
-    <div class="control-row">
-      <div class="control-label-group">
-        <span class="control-main-label" id="splitControlMainLabel">Pages Per Split Piece</span>
-        <span class="control-sub-label" id="splitControlSubLabel">Type number or drag horizontally to adjust</span>
-      </div>
-      <div class="stepper-control">
-        <button type="button" class="btn-stepper" id="btnDecChunk" aria-label="Decrease value">−</button>
-        <input type="number" id="chunkSizeInput" class="stepper-input" value="5" min="1" max="999" inputmode="numeric" />
-        <button type="button" class="btn-stepper" id="btnIncChunk" aria-label="Increase value">+</button>
-      </div>
-    </div>
-  </div>
-
-
-  <!-- Human-Readable Output Plan Summary -->
-  <div class="split-plan-card" id="splitPlanCard">
-    <div class="split-plan-text-group">
-      <div class="plan-headline">
-        <span class="plan-bullet"></span>
-        <span class="plan-sentence-main" id="planSentenceMain">Will create 5 PDF files</span>
-      </div>
-      <p class="plan-sentence-detail" id="planSentenceDetail">4 files of 12 pages + 1 final file with remaining 8 pages</p>
-    </div>
-    <div class="plan-segment-bar" id="planSegmentBar">
-      <!-- Visual proportional segments rendered here -->
-    </div>
-  </div>
-
-  <div class="action-row">
-    <button type="button" class="btn btn-secondary" id="changeFileBtn">Change File</button>
-    <button type="button" class="btn btn-primary" id="startSplitBtn">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="6" cy="6" r="3"></circle>
-        <circle cx="6" cy="18" r="3"></circle>
-        <line x1="20" y1="4" x2="8.12" y2="15.88"></line>
-        <line x1="14.47" y1="14.48" x2="20" y2="20"></line>
-        <line x1="8.12" y1="8.12" x2="12" y2="12"></line>
-      </svg>
-      <span>Split PDF Document</span>
-    </button>
   </div>
 </div>
 
