@@ -2181,12 +2181,12 @@ body {
 
 .danger-tooltip-popup {
   position: absolute;
-  bottom: calc(100% + 8px);
+  bottom: calc(100% + 7px);
   left: 50%;
   transform: translateX(-50%) translateY(4px);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 160ms ease, transform 160ms ease;
+  transition: opacity 140ms ease, transform 140ms cubic-bezier(0.16, 1, 0.3, 1);
   z-index: 1000;
   white-space: nowrap;
 }
@@ -2198,23 +2198,25 @@ body {
 
 .danger-tooltip-content {
   position: relative;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 12px;
-  background: rgba(24, 18, 20, 0.96);
-  border: 1px solid rgba(239, 68, 68, 0.45);
-  border-radius: 6px;
-  font-size: 0.74rem;
+  padding: 5px 10px;
+  background: rgba(18, 20, 26, 0.95);
+  border: 1px solid rgba(244, 63, 94, 0.3);
+  border-radius: 7px;
+  font-size: 0.72rem;
   font-weight: 500;
-  color: #fecaca;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.7), 0 0 12px rgba(239, 68, 68, 0.15);
-  backdrop-filter: blur(12px);
+  color: #e2e8f0;
+  box-shadow: 0 10px 24px -4px rgba(0, 0, 0, 0.7), 0 0 12px rgba(244, 63, 94, 0.1);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  letter-spacing: 0.01em;
 }
 
-.danger-tooltip-icon {
-  font-size: 0.82rem;
-  line-height: 1;
+.danger-tooltip-svg {
+  color: #fb7185;
+  flex-shrink: 0;
 }
 
 .danger-tooltip-content::after {
@@ -2223,9 +2225,9 @@ body {
   top: 100%;
   left: 50%;
   transform: translateX(-50%);
-  border-width: 5px;
+  border-width: 4px;
   border-style: solid;
-  border-color: rgba(239, 68, 68, 0.45) transparent transparent transparent;
+  border-color: rgba(18, 20, 26, 0.95) transparent transparent transparent;
 }
 
 .transport-tools-group {
@@ -2655,25 +2657,53 @@ body {
   margin: 0;
 }
 
-.stepper-row {
+.stepper-control-row {
   display: flex;
   align-items: center;
-  gap: 12px;
-  font-size: 0.9rem;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
 }
 
-.stepper-label {
-  color: var(--text-secondary);
-  font-weight: 500;
+.stepper-label-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stepper-main-label {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.stepper-sub-label {
+  font-size: 0.74rem;
+  color: var(--text-tertiary);
+  letter-spacing: 0.01em;
 }
 
 .landing-stepper {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.45);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: var(--radius-md);
   overflow: hidden;
+  cursor: ew-resize;
+  user-select: none;
+  touch-action: none;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.landing-stepper:hover {
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.landing-stepper.is-dragging {
+  border-color: #ffffff;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.15);
+  cursor: grabbing;
 }
 
 .stepper-btn {
@@ -2695,7 +2725,7 @@ body {
 }
 
 .stepper-input {
-  width: 50px;
+  width: 52px;
   height: 36px;
   background: transparent;
   border: none;
@@ -2705,7 +2735,16 @@ body {
   font-weight: 700;
   text-align: center;
   outline: none;
+  cursor: ew-resize;
   -moz-appearance: textfield;
+}
+
+.landing-stepper.is-dragging .stepper-input {
+  cursor: grabbing;
+}
+
+.stepper-input:focus {
+  cursor: text;
 }
 
 .stepper-input::-webkit-outer-spin-button,

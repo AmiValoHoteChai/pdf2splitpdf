@@ -448,6 +448,7 @@ import Footer from '../components/Footer.astro';
     redoStack.length = 0;
     studioSavedCuts = [];
     updateStudioCutsQueueUI();
+    resetMonitorZoom();
 
     selectedPagesSet.clear();
     for (let p = trimmerInPage; p <= trimmerOutPage; p++) {
@@ -495,7 +496,6 @@ import Footer from '../components/Footer.astro';
       pageNum = closest;
     }
     monitorCurrentPage = pageNum;
-    resetMonitorZoom();
 
     const currentIdx = selList.indexOf(pageNum);
     const totalSelected = selList.length;
@@ -524,6 +524,7 @@ import Footer from '../components/Footer.astro';
       if (monitorLoading) monitorLoading.classList.add('active');
       const targetW = Math.min(1200, Math.max(900, Math.floor(window.innerWidth * 0.75)));
       await renderPageToCanvas(pdfJsDoc, pageNum, trimmerMonitorCanvas, targetW);
+      applyMonitorTransform();
     } catch (err) {
       console.warn('Monitor render page error:', err);
     } finally {
@@ -1138,37 +1139,131 @@ import Footer from '../components/Footer.astro';
     tabEqualParts?.addEventListener('click', () => setSplitMode('equal-parts'));
     tabCutRange?.addEventListener('click', () => setSplitMode('page-range'));
 
-    // Landing Steppers for Every N Pages
-    const landingChunkInput = document.getElementById('chunkSizeInput') as HTMLInputElement;
-    document.getElementById('btnLandingPagesDec')?.addEventListener('click', () => {
-      if (landingChunkInput) {
-        landingChunkInput.value = String(Math.max(1, (parseInt(landingChunkInput.value, 10) || 5) - 1));
-        updateLandingSplitPlans();
-      }
-    });
-    document.getElementById('btnLandingPagesInc')?.addEventListener('click', () => {
-      if (landingChunkInput) {
-        landingChunkInput.value = String(Math.min(totalPages, (parseInt(landingChunkInput.value, 10) || 5) + 1));
-        updateLandingSplitPlans();
-      }
-    });
-    landingChunkInput?.addEventListener('input', updateLandingSplitPlans);
+    // Reusable interactive Stepper with Mouse / Touch Swipe Scrubbing
+    function setupStepperScrubbing(
+      stepperId: string,
+      inputId: string,
+      btnDecId: string,
+      btnIncId: string,
+      minVal: number,
+      getMaxVal: () => number,
+      onChange: () => void
+    ) {
+      const stepperEl = document.getElementById(stepperId);
+      const inputEl = document.getElementById(inputId) as HTMLInputElement | null;
+      const btnDec = document.getElementById(btnDecId);
+      const btnInc = document.getElementById(btnIncId);
 
-    // Landing Steppers for Equal Parts
-    const landingPartInput = document.getElementById('partCountInput') as HTMLInputElement;
-    document.getElementById('btnLandingEqualDec')?.addEventListener('click', () => {
-      if (landingPartInput) {
-        landingPartInput.value = String(Math.max(2, (parseInt(landingPartInput.value, 10) || 3) - 1));
-        updateLandingSplitPlans();
-      }
-    });
-    document.getElementById('btnLandingEqualInc')?.addEventListener('click', () => {
-      if (landingPartInput) {
-        landingPartInput.value = String(Math.min(totalPages, (parseInt(landingPartInput.value, 10) || 3) + 1));
-        updateLandingSplitPlans();
-      }
-    });
-    landingPartInput?.addEventListener('input', updateLandingSplitPlans);
+      if (!stepperEl || !inputEl) return;
+
+      btnDec?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const cur = parseInt(inputEl.value, 10) || minVal;
+        const next = Math.max(minVal, cur - 1);
+        inputEl.value = String(next);
+        onChange();
+      });
+
+      btnInc?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const cur = parseInt(inputEl.value, 10) || minVal;
+        const maxV = Math.max(minVal, getMaxVal() || 999);
+        const next = Math.min(maxV, cur + 1);
+        inputEl.value = String(next);
+        onChange();
+      });
+
+      let isDragging = false;
+      let startX = 0;
+      let startVal = minVal;
+      let hasMoved = false;
+
+      const handleDragStart = (clientX: number, target: HTMLElement) => {
+        if (target.closest('.stepper-btn')) return;
+        isDragging = true;
+        hasMoved = false;
+        startX = clientX;
+        startVal = parseInt(inputEl.value, 10) || minVal;
+        stepperEl.classList.add('is-dragging');
+      };
+
+      const handleDragMove = (clientX: number) => {
+        if (!isDragging) return;
+        const dx = clientX - startX;
+        if (Math.abs(dx) > 3) {
+          hasMoved = true;
+          const delta = Math.round(dx / 8);
+          const maxV = Math.max(minVal, getMaxVal() || 999);
+          const nextVal = Math.max(minVal, Math.min(maxV, startVal + delta));
+          inputEl.value = String(nextVal);
+          onChange();
+        }
+      };
+
+      const handleDragEnd = () => {
+        if (isDragging) {
+          isDragging = false;
+          stepperEl.classList.remove('is-dragging');
+          if (!hasMoved) {
+            inputEl.focus();
+            inputEl.select();
+          }
+        }
+      };
+
+      stepperEl.addEventListener('mousedown', (e) => handleDragStart(e.clientX, e.target as HTMLElement));
+      document.addEventListener('mousemove', (e) => handleDragMove(e.clientX));
+      document.addEventListener('mouseup', handleDragEnd);
+
+      stepperEl.addEventListener('touchstart', (e) => {
+        if (e.touches[0]) handleDragStart(e.touches[0].clientX, e.target as HTMLElement);
+      }, { passive: true });
+      document.addEventListener('touchmove', (e) => {
+        if (isDragging && e.touches[0]) handleDragMove(e.touches[0].clientX);
+      }, { passive: true });
+      document.addEventListener('touchend', handleDragEnd);
+
+      inputEl.addEventListener('focus', () => inputEl.select());
+      inputEl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!hasMoved) inputEl.select();
+      });
+      inputEl.addEventListener('input', () => {
+        const cur = parseInt(inputEl.value, 10);
+        if (!isNaN(cur) && cur >= minVal) {
+          onChange();
+        }
+      });
+      inputEl.addEventListener('blur', () => {
+        let cur = parseInt(inputEl.value, 10);
+        const maxV = Math.max(minVal, getMaxVal() || 999);
+        if (isNaN(cur) || cur < minVal) cur = minVal;
+        if (cur > maxV) cur = maxV;
+        inputEl.value = String(cur);
+        onChange();
+      });
+    }
+
+    // Set up Equal Parts and Every N Pages steppers
+    setupStepperScrubbing(
+      'stepperEqualParts',
+      'partCountInput',
+      'btnLandingEqualDec',
+      'btnLandingEqualInc',
+      2,
+      () => totalPages || 50,
+      updateLandingSplitPlans
+    );
+
+    setupStepperScrubbing(
+      'stepperByPages',
+      'chunkSizeInput',
+      'btnLandingPagesDec',
+      'btnLandingPagesInc',
+      1,
+      () => totalPages || 999,
+      updateLandingSplitPlans
+    );
 
     // Fast Split Actions
     document.getElementById('btnFastSplitPages')?.addEventListener('click', () => {
@@ -1347,77 +1442,6 @@ import Footer from '../components/Footer.astro';
     removeFileBtn?.addEventListener('click', resetToEmpty);
     changeFileBtn?.addEventListener('click', () => fileInput.click());
     startSplitBtn?.addEventListener('click', startSplitting);
-
-    // Stepper Drag Scrubbing & Direct Typing
-    const stepperControl = document.querySelector('.stepper-control') as HTMLElement;
-    let isDragging = false;
-    let startX = 0;
-    let startVal = 5;
-    let hasMoved = false;
-
-    stepperControl?.addEventListener('mousedown', (e) => {
-      // Allow plus/minus buttons to work normally
-      if ((e.target as HTMLElement).closest('.btn-stepper')) return;
-
-      isDragging = true;
-      hasMoved = false;
-      startX = e.clientX;
-      startVal = parseInt(chunkSizeInput?.value || '1', 10);
-      stepperControl.classList.add('is-dragging');
-    });
-
-    document.addEventListener('mousemove', (e) => {
-      if (!isDragging) return;
-      const dx = e.clientX - startX;
-      if (Math.abs(dx) > 3) {
-        hasMoved = true;
-        // 8px of drag = 1 page change
-        const delta = Math.round(dx / 8);
-        setChunkValue(startVal + delta);
-      }
-    });
-
-    document.addEventListener('mouseup', () => {
-      if (isDragging) {
-        isDragging = false;
-        stepperControl?.classList.remove('is-dragging');
-        if (!hasMoved) {
-          chunkSizeInput?.select();
-        }
-      }
-    });
-
-    btnDecChunk?.addEventListener('click', () => {
-      const cur = parseInt(chunkSizeInput?.value || '1', 10);
-      setChunkValue(cur - 1);
-    });
-
-    btnIncChunk?.addEventListener('click', () => {
-      const cur = parseInt(chunkSizeInput?.value || '1', 10);
-      setChunkValue(cur + 1);
-    });
-
-    chunkSizeInput?.addEventListener('focus', () => {
-      chunkSizeInput.select();
-    });
-
-    chunkSizeInput?.addEventListener('click', () => {
-      if (!hasMoved) chunkSizeInput.select();
-    });
-
-    chunkSizeInput?.addEventListener('input', () => {
-      const cur = parseInt(chunkSizeInput.value, 10);
-      if (!isNaN(cur) && cur > 0) {
-        setChunkValue(cur);
-      }
-    });
-
-    chunkSizeInput?.addEventListener('blur', () => {
-      let cur = parseInt(chunkSizeInput.value, 10);
-      if (isNaN(cur) || cur < 1) cur = 1;
-      if (totalPages > 0 && cur > totalPages) cur = totalPages;
-      setChunkValue(cur);
-    });
 
     // Progress card cancel
     btnCancelSplit?.addEventListener('click', () => {

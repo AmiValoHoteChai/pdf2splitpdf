@@ -66,14 +66,16 @@
     <div class="mode-panel-container">
       <!-- 1. Equal Parts Panel (Default) -->
       <div class="mode-panel active" id="panelEqualParts">
-        <div class="stepper-row">
-          <span class="stepper-label">Divide into:</span>
-          <div class="landing-stepper">
-            <button type="button" class="stepper-btn" id="btnLandingEqualDec">−</button>
-            <input type="number" id="partCountInput" class="stepper-input" value="3" min="2" />
-            <button type="button" class="stepper-btn" id="btnLandingEqualInc">+</button>
+        <div class="stepper-control-row">
+          <div class="stepper-label-group">
+            <span class="stepper-main-label">Divide into parts</span>
+            <span class="stepper-sub-label">Drag left / right to adjust</span>
           </div>
-          <span class="stepper-unit">equal parts</span>
+          <div class="landing-stepper" id="stepperEqualParts" title="Click and drag horizontally or use +/- buttons">
+            <button type="button" class="stepper-btn" id="btnLandingEqualDec" aria-label="Decrease parts">−</button>
+            <input type="number" id="partCountInput" class="stepper-input" value="3" min="2" />
+            <button type="button" class="stepper-btn" id="btnLandingEqualInc" aria-label="Increase parts">+</button>
+          </div>
         </div>
         <div class="split-plan-badge" id="planEqualSentence">Will create 3 equal parts (~13 pages each)</div>
         <button type="button" class="btn btn-primary btn-fast-split" id="btnFastSplitEqual">
@@ -83,14 +85,16 @@
 
       <!-- 2. Every N Pages Panel -->
       <div class="mode-panel hidden" id="panelByPages">
-        <div class="stepper-row">
-          <span class="stepper-label">Split every:</span>
-          <div class="landing-stepper">
-            <button type="button" class="stepper-btn" id="btnLandingPagesDec">−</button>
-            <input type="number" id="chunkSizeInput" class="stepper-input" value="5" min="1" />
-            <button type="button" class="stepper-btn" id="btnLandingPagesInc">+</button>
+        <div class="stepper-control-row">
+          <div class="stepper-label-group">
+            <span class="stepper-main-label">Pages per piece</span>
+            <span class="stepper-sub-label">Drag left / right to adjust</span>
           </div>
-          <span class="stepper-unit">pages per file</span>
+          <div class="landing-stepper" id="stepperByPages" title="Click and drag horizontally or use +/- buttons">
+            <button type="button" class="stepper-btn" id="btnLandingPagesDec" aria-label="Decrease pages">−</button>
+            <input type="number" id="chunkSizeInput" class="stepper-input" value="5" min="1" />
+            <button type="button" class="stepper-btn" id="btnLandingPagesInc" aria-label="Increase pages">+</button>
+          </div>
         </div>
         <div class="split-plan-badge" id="planByPagesSentence">Will create 8 files (5 pages each)</div>
         <button type="button" class="btn btn-primary btn-fast-split" id="btnFastSplitPages">
