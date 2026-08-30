@@ -15,6 +15,35 @@ export async function loadPdfMetadata(arrayBuffer) {
 }
 
 /**
+ * Formats a list of 0-based page indices into compact readable range string
+ * e.g. [0, 1, 2, 4, 5] -> "Pages 1–3, 5–6"
+ */
+export function formatPageRangeList(pageIndices) {
+  if (!pageIndices || pageIndices.length === 0) return '0 Pages';
+  const pages = pageIndices.map(i => i + 1).sort((a, b) => a - b);
+  const ranges = [];
+  let start = pages[0];
+  let end = pages[0];
+
+  for (let i = 1; i < pages.length; i++) {
+    if (pages[i] === end + 1) {
+      end = pages[i];
+    } else {
+      ranges.push(start === end ? `${start}` : `${start}–${end}`);
+      start = pages[i];
+      end = pages[i];
+    }
+  }
+  ranges.push(start === end ? `${start}` : `${start}–${end}`);
+
+  const joined = ranges.join(', ');
+  if (joined.length <= 26) {
+    return ranges.length === 1 && start === end ? `Page ${joined}` : `Pages ${joined}`;
+  }
+  return `${pages.length} Pages`;
+}
+
+/**
  * Computes split plan partition arrays based on selected mode
  * @param {number} totalPages 
  * @param {string} mode - 'by-pages' | 'custom-ranges' | 'single-pages' | 'equal-parts'
@@ -111,10 +140,7 @@ export function computeSplitPlan(totalPages, mode = 'by-pages', options = {}) {
     if (pageIndices.length > 0) {
       const firstPage = pageIndices[0] + 1;
       const lastPage = pageIndices[pageIndices.length - 1] + 1;
-      const isContiguous = pageIndices.every((idx, i) => i === 0 || idx === pageIndices[i - 1] + 1);
-      const rangeText = isContiguous
-        ? (firstPage === lastPage ? `Page ${firstPage}` : `Pages ${firstPage}–${lastPage}`)
-        : `${pageIndices.length} Selected Pages`;
+      const rangeText = formatPageRangeList(pageIndices);
 
       plan.push({
         partIndex: 1,

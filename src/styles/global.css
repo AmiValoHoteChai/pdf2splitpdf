@@ -862,10 +862,11 @@ body {
 }
 
 /* Split Results List */
+/* Split Results List */
 .split-results-container {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   margin-bottom: 20px;
 }
 
@@ -873,11 +874,12 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 14px;
+  padding: 11px 14px;
   background: var(--bg-surface-elevated);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   transition: all var(--transition-fast);
+  gap: 16px;
 }
 
 .split-result-row:hover {
@@ -895,45 +897,74 @@ body {
   align-items: center;
   gap: 12px;
   min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
 }
 
-.split-result-icon {
-  width: 34px;
-  height: 34px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
+.split-result-box {
+  width: 32px;
+  height: 32px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--accent-primary);
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #f8fafc;
   flex-shrink: 0;
   transition: all var(--transition-fast);
 }
 
-.split-result-row.is-downloaded .split-result-icon {
+.split-result-row.is-downloaded .split-result-box {
   color: var(--status-success);
-  border-color: rgba(16, 185, 129, 0.3);
+  border-color: rgba(16, 185, 129, 0.35);
   background: var(--status-success-bg);
 }
 
 .split-result-text {
   min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .split-result-filename {
-  font-size: 0.88rem;
+  font-size: 0.87rem;
   font-weight: 600;
   color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  line-height: 1.25;
 }
 
 .split-result-meta {
-  font-size: 0.76rem;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.74rem;
   color: var(--text-secondary);
-  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: 0.01em;
+}
+
+.split-range-badge {
+  font-size: 0.74rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  padding: 0;
+  display: inline-block;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .btn-split-download {
@@ -970,6 +1001,37 @@ body {
 .btn-split-download.downloaded:hover {
   background: rgba(16, 185, 129, 0.2) !important;
   border-color: rgba(16, 185, 129, 0.5) !important;
+}
+
+.result-bottom-actions {
+  display: flex;
+  margin-top: 14px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-subtle);
+  width: 100%;
+}
+
+.btn-back-studio {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 11px 20px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  border-radius: var(--radius-md);
+  transition: all var(--transition-fast);
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle);
+  cursor: pointer;
+}
+
+.btn-back-studio:hover {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+  background: var(--bg-surface-hover);
 }
 
 
@@ -1125,14 +1187,16 @@ body {
 
 /* Page Range Tag Badge */
 .split-range-badge {
-  font-size: 0.7rem;
+  font-size: 0.72rem;
   font-weight: 600;
   color: var(--accent-primary);
   background: rgba(99, 102, 241, 0.12);
-  padding: 2px 6px;
+  padding: 2px 7px;
   border-radius: var(--radius-sm);
   display: inline-block;
-  margin-right: 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-right: 2px;
 }
 
 .split-action-buttons {
@@ -2883,5 +2947,109 @@ body {
 #visualTrimmerModal.is-fullscreen .fullscreen-exit-btn {
   display: flex !important;
 }
+
+/* ================================================= */
+/* 404 Not Found Modern Page Styling                 */
+/* ================================================= */
+.header-link-wrapper {
+  text-decoration: none;
+  color: inherit;
+  display: block;
+}
+
+.error-page-layout {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.error-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  text-align: center;
+  flex: 1;
+}
+
+.error-ambient-glow {
+  position: absolute;
+  top: 40%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 380px;
+  height: 240px;
+  background: radial-gradient(circle, rgba(99, 102, 241, 0.22) 0%, rgba(99, 102, 241, 0) 70%);
+  filter: blur(55px);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.error-hero {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 520px;
+}
+
+.error-glitch-code {
+  font-family: var(--font-mono);
+  font-size: clamp(5.5rem, 16vw, 9rem);
+  font-weight: 800;
+  line-height: 0.9;
+  letter-spacing: -0.06em;
+  background: linear-gradient(180deg, #ffffff 10%, rgba(255, 255, 255, 0.12) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0 0 70px rgba(99, 102, 241, 0.3);
+  user-select: none;
+  margin-bottom: 20px;
+}
+
+.error-main-heading {
+  font-size: 1.65rem;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: -0.02em;
+  margin-bottom: 10px;
+}
+
+.error-sub-text {
+  font-size: 0.92rem;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  margin-bottom: 24px;
+  max-width: 440px;
+}
+
+.error-actions {
+  display: flex;
+  justify-content: center;
+}
+
+.btn-error-home {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 24px;
+  text-decoration: none;
+  font-size: 0.9rem;
+  font-weight: 600;
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 20px rgba(99, 102, 241, 0.3);
+  transition: all var(--transition-fast);
+}
+
+.btn-error-home:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 26px rgba(99, 102, 241, 0.45);
+}
+
 
 

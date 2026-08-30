@@ -45,7 +45,8 @@ import Footer from '../components/Footer.astro';
     computeSplitPlan,
     splitPdfDocument,
     downloadSinglePdf,
-    downloadAllAsZip
+    downloadAllAsZip,
+    formatPageRangeList
   } from '../scripts/pdf-splitter.js';
   import {
     getPdfJsDocument,
@@ -432,7 +433,7 @@ import Footer from '../components/Footer.astro';
   // Visual Video-Style Trimmer Engine & Events
   // ==========================================
 
-  async function openVisualTrimmer() {
+  async function openVisualTrimmer(keepState: boolean = false) {
     if (!currentBuffer || !currentFile || totalPages <= 0) return;
 
     isTrimmerOpen = true;
@@ -440,22 +441,24 @@ import Footer from '../components/Footer.astro';
     if (monitorTotalPagesNum) monitorTotalPagesNum.textContent = String(totalPages);
     if (transportTotal) transportTotal.textContent = String(totalPages).padStart(2, '0');
 
-    // Read initial range from inputs
-    trimmerInPage = parseInt(rangeStartInput?.value || '1', 10) || 1;
-    trimmerOutPage = parseInt(rangeEndInput?.value || String(totalPages), 10) || totalPages;
+    if (!keepState) {
+      // Read initial range from inputs
+      trimmerInPage = parseInt(rangeStartInput?.value || '1', 10) || 1;
+      trimmerOutPage = parseInt(rangeEndInput?.value || String(totalPages), 10) || totalPages;
 
-    undoStack.length = 0;
-    redoStack.length = 0;
-    studioSavedCuts = [];
-    updateStudioCutsQueueUI();
-    resetMonitorZoom();
+      undoStack.length = 0;
+      redoStack.length = 0;
+      studioSavedCuts = [];
+      updateStudioCutsQueueUI();
+      resetMonitorZoom();
 
-    selectedPagesSet.clear();
-    for (let p = trimmerInPage; p <= trimmerOutPage; p++) {
-      selectedPagesSet.add(p);
+      selectedPagesSet.clear();
+      for (let p = trimmerInPage; p <= trimmerOutPage; p++) {
+        selectedPagesSet.add(p);
+      }
+
+      monitorCurrentPage = trimmerInPage;
     }
-
-    monitorCurrentPage = trimmerInPage;
 
     // Lock page scroll
     document.documentElement.style.overflow = 'hidden';
@@ -465,6 +468,7 @@ import Footer from '../components/Footer.astro';
 
     updateTrimmerHeaderStats();
     renderTimelineTrackSkeleton();
+    updateTimelineCardsCutState();
 
     // Lazy load PDFJS document
     try {
@@ -904,15 +908,12 @@ import Footer from '../components/Footer.astro';
     const selList = getSelectedPagesArray();
     if (selList.length === 0) return;
 
-    const startP = selList[0];
-    const endP = selList[selList.length - 1];
-    const rangeText = selList.length === (endP - startP + 1)
-      ? (startP === endP ? `Page ${startP}` : `Pages ${startP}–${endP}`)
-      : `${selList.length} Selected Pages`;
+    const pageIndices = selList.map(p => p - 1);
+    const rangeText = formatPageRangeList(pageIndices);
 
     const newCut: SavedStudioCut = {
       id: 'cut-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
-      pageIndices: selList.map(p => p - 1),
+      pageIndices,
       pages: [...selList],
       pageRangeText: rangeText
     };
@@ -999,42 +1000,50 @@ import Footer from '../components/Footer.astro';
     if (statPages) statPages.textContent = String(totalPagesExtracted);
     if (statSize) statSize.textContent = formatBytes(totalSplitBytes);
 
-    splitResultsList.innerHTML = splitResults.map((item, idx) => `
-      <div class="split-result-row" id="splitRow-${idx}">
-        <div class="split-result-info">
-          <div class="split-result-icon">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-              <polyline points="14 2 14 8 20 8"></polyline>
-            </svg>
-          </div>
-          <div class="split-result-text">
-            <div class="split-result-filename">
-              <span class="split-range-badge">${item.pageRangeText}</span>
-              ${item.filename}
+    splitResultsList.innerHTML = splitResults.map((item, idx) => {
+      const isCountOnly = /^(\d+)\s*pages?$/i.test((item.pageRangeText || '').trim());
+
+      const metaHtml = isCountOnly
+        ? `<span class="split-range-badge">${item.pageCount} page${item.pageCount === 1 ? '' : 's'}</span>
+           <span class="meta-dot">•</span>
+           <span>${formatBytes(item.size)}</span>`
+        : `<span class="split-range-badge">${item.pageRangeText}</span>
+           <span class="meta-dot">•</span>
+           <span>${item.pageCount} page${item.pageCount === 1 ? '' : 's'}</span>
+           <span class="meta-dot">•</span>
+           <span>${formatBytes(item.size)}</span>`;
+
+      return `
+        <div class="split-result-row" id="splitRow-${idx}">
+          <div class="split-result-info">
+            <div class="split-result-box">${idx + 1}</div>
+            <div class="split-result-text">
+              <div class="split-result-filename" title="${item.filename}">${item.filename}</div>
+              <div class="split-result-meta">
+                ${metaHtml}
+              </div>
             </div>
-            <div class="split-result-meta">${item.pageCount} page${item.pageCount === 1 ? '' : 's'} • ${formatBytes(item.size)}</div>
+          </div>
+          <div class="split-action-buttons">
+            <button type="button" class="btn-split-preview" data-index="${idx}" title="Preview PDF piece">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+              </svg>
+              <span>Preview</span>
+            </button>
+            <button type="button" class="btn-split-download" data-index="${idx}" id="btnDownload-${idx}">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+              <span>Download</span>
+            </button>
           </div>
         </div>
-        <div class="split-action-buttons">
-          <button type="button" class="btn-split-preview" data-index="${idx}" title="Preview PDF piece">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-              <circle cx="12" cy="12" r="3"></circle>
-            </svg>
-            <span>Preview</span>
-          </button>
-          <button type="button" class="btn-split-download" data-index="${idx}" id="btnDownload-${idx}">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-              <polyline points="7 10 12 15 17 10"></polyline>
-              <line x1="12" y1="15" x2="12" y2="3"></line>
-            </svg>
-            <span>Download</span>
-          </button>
-        </div>
-      </div>
-    `).join('');
+      `;
+    }).join('');
 
     // Attach click handlers
     const downloadBtns = splitResultsList.querySelectorAll('.btn-split-download');
@@ -1267,13 +1276,15 @@ import Footer from '../components/Footer.astro';
 
     // Fast Split Actions
     document.getElementById('btnFastSplitPages')?.addEventListener('click', () => {
-      const cSize = landingChunkInput ? parseInt(landingChunkInput.value, 10) || 5 : 5;
+      const chunkInp = document.getElementById('chunkSizeInput') as HTMLInputElement | null;
+      const cSize = chunkInp ? parseInt(chunkInp.value, 10) || 5 : 5;
       currentSplitPlan = computeSplitPlan(totalPages, 'by-pages', { chunkSize: cSize });
       startSplitting();
     });
 
     document.getElementById('btnFastSplitEqual')?.addEventListener('click', () => {
-      const pCount = landingPartInput ? parseInt(landingPartInput.value, 10) || 3 : 3;
+      const partInp = document.getElementById('partCountInput') as HTMLInputElement | null;
+      const pCount = partInp ? parseInt(partInp.value, 10) || 3 : 3;
       currentSplitPlan = computeSplitPlan(totalPages, 'equal-parts', { partCount: pCount });
       startSplitting();
     });
@@ -1457,6 +1468,9 @@ import Footer from '../components/Footer.astro';
         const base = currentFile.name.replace(/\.pdf$/i, '');
         downloadAllAsZip(splitResults, `${base}_split.zip`);
       }
+    });
+    document.getElementById('btnBackToStudio')?.addEventListener('click', () => {
+      openVisualTrimmer(true);
     });
 
     // Confirmation Modal Events
